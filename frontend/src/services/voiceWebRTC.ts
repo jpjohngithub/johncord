@@ -1,18 +1,14 @@
 import { Peer, MediaConnection } from 'peerjs';
 import { useVoiceStore } from '../stores/useVoiceStore';
-import { useAuthStore } from '../stores/useAuthStore';
-import { getSocket } from '../services/socket';
+import { publishGlobalEvent, subscribeGlobalTopic } from './globalRealtime';
 import { VoiceParticipant } from '../types';
 
-// Global PeerJS instance & Active Calls Map
 let peerInstance: Peer | null = null;
 const activeCalls: Map<string, MediaConnection> = new Map();
 const audioAnalysers: Map<string, { analyser: AnalyserNode; source: MediaStreamAudioSourceNode }> = new Map();
 let globalAudioCtx: AudioContext | null = null;
 let volumeCheckRaf: number | null = null;
-
-// Public multi-user signaling via WebSocket room pubsub for standalone Netlify support
-let signalingSocket: WebSocket | null = null;
+let currentChannelTopicUnsub: (() => void) | null = null;
 
 function getAudioContext(): AudioContext {
   if (!globalAudioCtx || globalAudioCtx.state === 'closed') {
@@ -24,55 +20,16 @@ function getAudioContext(): AudioContext {
   return globalAudioCtx;
 }
 
-// Connect to a public lightweight signaling room for standalone/Netlify mode
-function initPublicSignaling(channelId: string, user: any, onPeerJoined: (peerId: string, remoteUser: any) => void) {
-  try {
-    // Connect to a reliable public WebSocket echo / pubsub endpoint or broadcast channel
-    const broadcast = new BroadcastChannel(`johncord_voice_room_${channelId}`);
-    
-    broadcast.onmessage = (event) => {
-      const { type, data } = event.data || {};
-      if (type === 'peer_join' && data.userId !== user.id) {
-        onPeerJoined(data.peerId, data.user);
-        // Respond so the newcomer knows about us
-        broadcast.postMessage({
-          type: 'peer_presence',
-          data: { peerId: `jc_peer_${user.id}`, user, channelId }
-        });
-      } else if (type === 'peer_presence' && data.userId !== user.id) {
-        onPeerJoined(data.peerId, data.user);
-      } else if (type === 'peer_speaking') {
-        useVoiceStore.getState().setSpeaking(data.userId, data.speaking);
-      }
-    };
-
-    // Announce our presence
-    broadcast.postMessage({
-      type: 'peer_join',
-      data: { peerId: `jc_peer_${user.id}`, user, channelId }
-    });
-
-    return () => {
-      broadcast.postMessage({
-        type: 'peer_leave',
-        data: { peerId: `jc_peer_${user.id}`, userId: user.id }
-      });
-      broadcast.close();
-    };
-  } catch (e) {
-    return () => {};
-  }
-}
-
 export function startVoiceConnection(
   channelId: string,
   localStream: MediaStream,
   user: any
 ) {
-  // Clean up any existing connection
   stopVoiceConnection();
 
   const peerId = `jc_peer_${user.id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+  console.log(`🎙️ [Johncord Voice] Initializing WebRTC voice mesh for channel ${channelId} with PeerID: ${peerId}`);
 
   try {
     peerInstance = new Peer(peerId, {
@@ -80,43 +37,42 @@ export function startVoiceConnection(
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:global.stun.twilio.com:3478' }
         ]
       },
       debug: 1
     });
 
     peerInstance.on('open', (id) => {
-      console.log('🎤 [Johncord Voice] PeerJS connected with ID:', id);
+      console.log('🎤 [Johncord Voice] PeerJS ready on global mesh:', id);
 
-      // Register with Socket.IO backend if available
-      const socket = getSocket();
-      socket.emit('voice:peer_ready', {
-        channelId,
+      // Broadcast join event to global real-time room
+      publishGlobalEvent(`johncord/voice/${channelId}`, {
+        type: 'peer_join',
         peerId: id,
-        user
+        user,
+        channelId
       });
     });
 
-    // Handle Incoming Calls from other participants in the voice channel
+    // Handle incoming voice calls from other users in this channel
     peerInstance.on('call', (call) => {
-      console.log('📞 [Johncord Voice] Incoming call from peer:', call.peer);
+      console.log('📞 [Johncord Voice] Answering incoming audio stream from:', call.peer);
       call.answer(localStream);
 
       call.on('stream', (remoteStream) => {
-        console.log('🔊 [Johncord Voice] Received audio stream from peer:', call.peer);
+        console.log('🔊 [Johncord Voice] Audio stream active from:', call.peer);
         const remoteUserId = call.peer.replace('jc_peer_', '');
         
-        // Save stream to store
         useVoiceStore.getState().setRemoteStream(remoteUserId, remoteStream);
-        
-        // Add participant to list if not already present
+
         const currentParticipants = useVoiceStore.getState().participants;
         if (!currentParticipants.some(p => p.userId === remoteUserId)) {
           const newParticipant: VoiceParticipant = {
             userId: remoteUserId,
             socketId: call.peer,
-            username: (call.metadata?.username || `Usuário`),
+            username: call.metadata?.username || `Usuário`,
             avatar_url: call.metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${remoteUserId}`,
             channelId,
             muted: false,
@@ -129,7 +85,6 @@ export function startVoiceConnection(
           });
         }
 
-        // Attach audio analyser for real-time green speaking stroke
         attachStreamVolumeAnalyser(remoteUserId, remoteStream);
       });
 
@@ -137,31 +92,57 @@ export function startVoiceConnection(
     });
 
     peerInstance.on('error', (err) => {
-      console.warn('⚠️ [Johncord Voice] PeerJS error:', err.type, err.message);
+      console.warn('⚠️ [Johncord Voice] Peer error:', err.type, err.message);
     });
   } catch (err) {
-    console.warn('Failed to initialize PeerJS:', err);
+    console.warn('Failed to start PeerJS:', err);
   }
 
-  // Monitor Local Microphone Volume for speaking stroke
+  // Monitor local microphone volume for glowing green speaking stroke
   attachLocalMicAnalyser(localStream, user.id, channelId);
 
-  // Hook up multi-tab & network discovery
-  const cleanupSignaling = initPublicSignaling(channelId, user, (remotePeerId, remoteUser) => {
-    callRemotePeer(remotePeerId, localStream, user, remoteUser);
+  // Subscribe to voice room signaling across the internet
+  currentChannelTopicUnsub = subscribeGlobalTopic(`johncord/voice/${channelId}`, (payload) => {
+    if (payload.type === 'peer_join' && payload.peerId !== peerId) {
+      console.log(`👋 [Johncord Voice] Discovered remote peer in room: ${payload.peerId} (${payload.user?.username})`);
+      
+      // Call the newcomer
+      callRemotePeer(payload.peerId, localStream, user, payload.user);
+
+      // Reply with our presence so they know we are already here
+      publishGlobalEvent(`johncord/voice/${channelId}`, {
+        type: 'peer_presence',
+        peerId,
+        user,
+        channelId
+      });
+    } else if (payload.type === 'peer_presence' && payload.peerId !== peerId) {
+      callRemotePeer(payload.peerId, localStream, user, payload.user);
+    } else if (payload.type === 'peer_speaking' && payload.userId !== user.id) {
+      useVoiceStore.getState().setSpeaking(payload.userId, payload.speaking);
+    } else if (payload.type === 'peer_leave') {
+      const remoteUserId = payload.peerId.replace('jc_peer_', '');
+      useVoiceStore.getState().removeRemoteStream(remoteUserId);
+      activeCalls.get(payload.peerId)?.close();
+      activeCalls.delete(payload.peerId);
+    }
   });
 
   return () => {
-    cleanupSignaling();
+    publishGlobalEvent(`johncord/voice/${channelId}`, {
+      type: 'peer_leave',
+      peerId,
+      userId: user.id
+    });
     stopVoiceConnection();
   };
 }
 
 export function callRemotePeer(remotePeerId: string, localStream: MediaStream, localUser: any, remoteUser: any) {
   if (!peerInstance || peerInstance.destroyed || !localStream) return;
-  if (activeCalls.has(remotePeerId)) return; // Already connected
+  if (activeCalls.has(remotePeerId)) return;
 
-  console.log('📡 [Johncord Voice] Calling peer:', remotePeerId);
+  console.log('📡 [Johncord Voice] Dialing peer across internet:', remotePeerId);
 
   try {
     const call = peerInstance.call(remotePeerId, localStream, {
@@ -176,12 +157,11 @@ export function callRemotePeer(remotePeerId: string, localStream: MediaStream, l
       activeCalls.set(remotePeerId, call);
 
       call.on('stream', (remoteStream) => {
-        console.log('🔊 [Johncord Voice] Stream established with:', remotePeerId);
+        console.log('🔊 [Johncord Voice] Audio stream connected with:', remotePeerId);
         const remoteUserId = remotePeerId.replace('jc_peer_', '');
         
         useVoiceStore.getState().setRemoteStream(remoteUserId, remoteStream);
 
-        // Add to participants
         const currentParticipants = useVoiceStore.getState().participants;
         if (!currentParticipants.some(p => p.userId === remoteUserId)) {
           const newParticipant: VoiceParticipant = {
@@ -214,14 +194,13 @@ export function callRemotePeer(remotePeerId: string, localStream: MediaStream, l
   }
 }
 
-// Attach AnalyserNode to detect speaking activity on microphone
 function attachLocalMicAnalyser(stream: MediaStream, userId: string, channelId: string) {
   try {
     const audioCtx = getAudioContext();
     const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.4;
+    analyser.smoothingTimeConstant = 0.3;
     source.connect(analyser);
 
     audioAnalysers.set(userId, { analyser, source });
@@ -236,6 +215,11 @@ function attachLocalMicAnalyser(stream: MediaStream, userId: string, channelId: 
         if (wasSpeaking) {
           wasSpeaking = false;
           useVoiceStore.getState().setSpeaking(userId, false);
+          publishGlobalEvent(`johncord/voice/${channelId}`, {
+            type: 'peer_speaking',
+            userId,
+            speaking: false
+          });
         }
         volumeCheckRaf = requestAnimationFrame(checkLocalVolume);
         return;
@@ -247,21 +231,17 @@ function attachLocalMicAnalyser(stream: MediaStream, userId: string, channelId: 
         sum += dataArray[i];
       }
       const avg = sum / bufferLength;
-      const isSpeaking = avg > 14; // voice threshold
+      const isSpeaking = avg > 12; // High sensitivity threshold
 
       if (isSpeaking !== wasSpeaking) {
         wasSpeaking = isSpeaking;
         useVoiceStore.getState().setSpeaking(userId, isSpeaking);
 
-        // Broadcast to socket & local channel
-        const socket = getSocket();
-        socket.emit('voice:speaking_status', { channelId, speaking: isSpeaking });
-
-        try {
-          const bc = new BroadcastChannel(`johncord_voice_room_${channelId}`);
-          bc.postMessage({ type: 'peer_speaking', data: { userId, speaking: isSpeaking } });
-          bc.close();
-        } catch (e) {}
+        publishGlobalEvent(`johncord/voice/${channelId}`, {
+          type: 'peer_speaking',
+          userId,
+          speaking: isSpeaking
+        });
       }
 
       volumeCheckRaf = requestAnimationFrame(checkLocalVolume);
@@ -273,7 +253,6 @@ function attachLocalMicAnalyser(stream: MediaStream, userId: string, channelId: 
   }
 }
 
-// Attach AnalyserNode to detect speaking activity on remote audio streams
 function attachStreamVolumeAnalyser(userId: string, stream: MediaStream) {
   try {
     if (audioAnalysers.has(userId)) return;
@@ -282,7 +261,7 @@ function attachStreamVolumeAnalyser(userId: string, stream: MediaStream) {
     const source = audioCtx.createMediaStreamSource(stream);
     const analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.4;
+    analyser.smoothingTimeConstant = 0.3;
     source.connect(analyser);
 
     audioAnalysers.set(userId, { analyser, source });
@@ -292,7 +271,6 @@ function attachStreamVolumeAnalyser(userId: string, stream: MediaStream) {
     let wasSpeaking = false;
 
     const checkRemoteVolume = () => {
-      // If stream was removed, stop check
       if (!useVoiceStore.getState().remoteStreams[userId]) return;
 
       analyser.getByteFrequencyData(dataArray);
@@ -301,7 +279,7 @@ function attachStreamVolumeAnalyser(userId: string, stream: MediaStream) {
         sum += dataArray[i];
       }
       const avg = sum / bufferLength;
-      const isSpeaking = avg > 14;
+      const isSpeaking = avg > 12;
 
       if (isSpeaking !== wasSpeaking) {
         wasSpeaking = isSpeaking;
@@ -321,6 +299,11 @@ export function stopVoiceConnection() {
   if (volumeCheckRaf) {
     cancelAnimationFrame(volumeCheckRaf);
     volumeCheckRaf = null;
+  }
+
+  if (currentChannelTopicUnsub) {
+    currentChannelTopicUnsub();
+    currentChannelTopicUnsub = null;
   }
 
   activeCalls.forEach((call) => call.close());

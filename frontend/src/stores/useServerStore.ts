@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Server, Channel, Category, Role, ServerMember } from '../types';
 import { apiRequest } from '../services/api';
+import { getSocket } from '../services/socket';
 
 interface ServerState {
   servers: Server[];
@@ -23,6 +24,7 @@ interface ServerState {
   isMemberListOpen: boolean;
 
   // Actions
+  setupServerSocketListeners: () => () => void;
   loadServers: () => Promise<void>;
   selectServer: (serverId: string | null) => Promise<void>;
   selectChannel: (channelId: string) => void;
@@ -272,5 +274,23 @@ export const useServerStore = create<ServerState>((set, get) => ({
   }),
   setCreateChannelModalOpen: (open) => set({ isCreateChannelModalOpen: open }),
   setCreateCategoryModalOpen: (open) => set({ isCreateCategoryModalOpen: open }),
-  toggleMemberList: () => set((state) => ({ isMemberListOpen: !state.isMemberListOpen }))
+  toggleMemberList: () => set((state) => ({ isMemberListOpen: !state.isMemberListOpen })),
+
+  setupServerSocketListeners: () => {
+    const socket = getSocket();
+    const handleMemberJoined = () => {
+      const sId = get().currentServerId;
+      if (sId) get().selectServer(sId);
+    };
+    const handleChannelCreated = () => {
+      const sId = get().currentServerId;
+      if (sId) get().selectServer(sId);
+    };
+    socket.on('server:member_joined', handleMemberJoined);
+    socket.on('server:channel_created', handleChannelCreated);
+    return () => {
+      socket.off('server:member_joined', handleMemberJoined);
+      socket.off('server:channel_created', handleChannelCreated);
+    };
+  }
 }));

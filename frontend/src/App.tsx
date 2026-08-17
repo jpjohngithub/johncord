@@ -75,11 +75,13 @@ export const App: React.FC = () => {
       const cleanupChat = setupSocketListeners();
       const cleanupFriends = setupFriendSocketListeners();
       const cleanupVoice = setupVoiceSocketListeners();
+      const cleanupServer = useServerStore.getState().setupServerSocketListeners();
 
       return () => {
         cleanupChat();
         cleanupFriends();
         cleanupVoice();
+        cleanupServer();
       };
     }
   }, [user?.id, token]);

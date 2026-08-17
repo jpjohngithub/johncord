@@ -1,4 +1,5 @@
 import { User, Server, Channel, Category, Role, ServerMember, Message, DMConversation, FriendItem, Thread } from '../types';
+import { publishGlobalEvent, subscribeGlobalTopic, initGlobalRealtime } from './globalRealtime';
 
 interface LocalDB {
   users: User[];
@@ -14,7 +15,7 @@ interface LocalDB {
   dm_members: { id: string; dm_conversation_id: string; user_id: string }[];
 }
 
-const DB_KEY = 'johncord_clean_db_v3';
+const DB_KEY = 'johncord_global_db_v4';
 
 function createInitialDB(): LocalDB {
   const botUser: User = {
@@ -30,21 +31,8 @@ function createInitialDB(): LocalDB {
     created_at: new Date().toISOString()
   };
 
-  const devUser: User = {
-    id: 'user_dev',
-    username: 'JohnDev',
-    tag: '1337',
-    email: 'dev@johncord.gg',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=JohnDev',
-    banner_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80',
-    bio: 'Criador do Johncord!',
-    custom_status: 'Codando 🎧',
-    presence: 'online',
-    created_at: new Date().toISOString()
-  };
-
   return {
-    users: [botUser, devUser],
+    users: [botUser],
     servers: [],
     categories: [],
     channels: [],
@@ -52,31 +40,9 @@ function createInitialDB(): LocalDB {
     server_members: [],
     messages: [],
     threads: [],
-    friendships: [
-      { id: 'f_1', sender_id: devUser.id, receiver_id: botUser.id, status: 'accepted', created_at: new Date().toISOString() }
-    ],
-    dm_conversations: [
-      {
-        id: 'dm_dev_bot',
-        is_group: 0,
-        created_at: new Date().toISOString(),
-        members: [devUser, botUser],
-        last_message: {
-          id: 'dm_msg_1',
-          dm_conversation_id: 'dm_dev_bot',
-          user_id: botUser.id,
-          content: '👋 Olá! Crie seu próprio servidor clicando no botão **"+"** à esquerda ou convide amigos para uma chamada de voz!',
-          attachments: [],
-          is_pinned: 0,
-          created_at: new Date().toISOString(),
-          user: botUser
-        }
-      }
-    ],
-    dm_members: [
-      { id: 'dmm_1', dm_conversation_id: 'dm_dev_bot', user_id: devUser.id },
-      { id: 'dmm_2', dm_conversation_id: 'dm_dev_bot', user_id: botUser.id }
-    ]
+    friendships: [],
+    dm_conversations: [],
+    dm_members: []
   };
 }
 
@@ -96,29 +62,117 @@ function saveDB(db: LocalDB) {
   } catch (e) {}
 }
 
-let channel: BroadcastChannel | null = null;
+// Local and Global Real-time Bridge
+let localBroadcast: BroadcastChannel | null = null;
 try {
-  channel = new BroadcastChannel('johncord_realtime_events');
+  localBroadcast = new BroadcastChannel('johncord_realtime_events');
 } catch (e) {}
 
 export function broadcastLocalEvent(event: string, data: any) {
-  if (channel) {
-    channel.postMessage({ event, data });
+  if (localBroadcast) {
+    localBroadcast.postMessage({ event, data });
   }
 }
 
 export function subscribeLocalEvents(callback: (event: string, data: any) => void) {
-  if (!channel) return () => {};
-  const handler = (msg: MessageEvent) => {
-    if (msg.data?.event) {
-      callback(msg.data.event, msg.data.data);
+  const cleanups: (() => void)[] = [];
+
+  // 1. Same-browser broadcast channel
+  if (localBroadcast) {
+    const handler = (msg: MessageEvent) => {
+      if (msg.data?.event) {
+        callback(msg.data.event, msg.data.data);
+      }
+    };
+    localBroadcast.addEventListener('message', handler);
+    cleanups.push(() => localBroadcast?.removeEventListener('message', handler));
+  }
+
+  // 2. Global Internet Real-time pubsub for multi-device sync
+  initGlobalRealtime();
+
+  // Listen for global server & member events
+  const unsubServers = subscribeGlobalTopic('johncord/global/servers', (payload) => {
+    const db = getDB();
+    if (payload.type === 'server_created' && payload.server) {
+      if (!db.servers.some(s => s.id === payload.server.id)) {
+        db.servers.push(payload.server);
+        if (payload.categories) db.categories.push(...payload.categories);
+        if (payload.channels) db.channels.push(...payload.channels);
+        if (payload.roles) db.roles.push(...payload.roles);
+        if (payload.member) db.server_members.push(payload.member);
+        saveDB(db);
+      }
+    } else if (payload.type === 'member_joined' && payload.member) {
+      if (!db.server_members.some(m => m.id === payload.member.id || (m.server_id === payload.member.server_id && m.user_id === payload.member.user_id))) {
+        db.server_members.push(payload.member);
+        if (payload.user && !db.users.some(u => u.id === payload.user.id)) {
+          db.users.push(payload.user);
+        }
+        saveDB(db);
+        callback('server:member_joined', { member: payload.member });
+      }
+    } else if (payload.type === 'channel_created' && payload.channel) {
+      if (!db.channels.some(c => c.id === payload.channel.id)) {
+        db.channels.push(payload.channel);
+        saveDB(db);
+        callback('server:channel_created', { channel: payload.channel });
+      }
     }
+  });
+  cleanups.push(unsubServers);
+
+  // Listen for global presence events (seeing other people online in real-time!)
+  const unsubPresence = subscribeGlobalTopic('johncord/global/presence', (payload) => {
+    const db = getDB();
+    if (payload.user) {
+      const idx = db.users.findIndex(u => u.id === payload.user.id);
+      if (idx !== -1) {
+        db.users[idx] = { ...db.users[idx], ...payload.user, presence: payload.user.presence || 'online' };
+      } else {
+        db.users.push(payload.user);
+      }
+      saveDB(db);
+      callback('user:presence_changed', {
+        userId: payload.user.id,
+        presence: payload.user.presence || 'online',
+        custom_status: payload.user.custom_status
+      });
+    }
+  });
+  cleanups.push(unsubPresence);
+
+  // Listen for global chat messages
+  const unsubChat = subscribeGlobalTopic('johncord/global/chat', (payload) => {
+    const db = getDB();
+    if (payload.type === 'new_message' && payload.message) {
+      if (!db.messages.some(m => m.id === payload.message.id)) {
+        db.messages.push(payload.message);
+        saveDB(db);
+        callback('chat:message_received', {
+          roomId: payload.roomId,
+          message: payload.message
+        });
+      }
+    } else if (payload.type === 'reaction_changed') {
+      const msg = db.messages.find(m => m.id === payload.messageId);
+      if (msg) {
+        msg.reactions = payload.reactions;
+        saveDB(db);
+        callback('chat:reaction_changed', payload);
+      }
+    } else if (payload.type === 'user_typing') {
+      callback('chat:user_typing', payload);
+    }
+  });
+  cleanups.push(unsubChat);
+
+  return () => {
+    cleanups.forEach(fn => fn());
   };
-  channel.addEventListener('message', handler);
-  return () => channel?.removeEventListener('message', handler);
 }
 
-// Mock API request handler
+// Mock API request handler with instant global cloud sync
 export async function handleMockAPI(endpoint: string, options: RequestInit = {}): Promise<any> {
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
@@ -129,8 +183,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
   if (currentUserStr) {
     try { currentUser = JSON.parse(currentUserStr); } catch (e) {}
   }
-
-  await new Promise(r => setTimeout(r, 40));
 
   // --- Auth Routes ---
   if (endpoint === '/auth/login' && method === 'POST') {
@@ -150,6 +202,10 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       db.users.push(user);
       saveDB(db);
     }
+
+    // Broadcast presence to all users worldwide
+    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+
     return { token: 'mock_jwt_token_' + user.id, user };
   }
 
@@ -160,12 +216,15 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       username: username || 'NovoUsuario',
       tag: String(Math.floor(1000 + Math.random() * 9000)),
       email: email || `user_${Date.now()}@johncord.gg`,
-      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'NewUser'}`,
+      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(username || 'NewUser')}`,
       presence: 'online',
       created_at: new Date().toISOString()
     };
     db.users.push(user);
     saveDB(db);
+
+    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+
     return { token: 'mock_jwt_token_' + user.id, user };
   }
 
@@ -182,6 +241,9 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     };
     db.users.push(user);
     saveDB(db);
+
+    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+
     return { token: 'mock_jwt_token_' + user.id, user };
   }
 
@@ -195,6 +257,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     if (idx !== -1) {
       db.users[idx] = { ...db.users[idx], ...body };
       saveDB(db);
+      publishGlobalEvent('johncord/global/presence', { type: 'user_online', user: db.users[idx] });
       return { user: db.users[idx] };
     }
     return { user: currentUser };
@@ -270,20 +333,33 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       created_at: new Date().toISOString()
     };
 
-    db.servers.push(server);
-    db.categories.push(catText, catVoice);
-    db.channels.push(chGeneralText, chGeneralVoice);
-    db.roles.push(adminRole);
-    db.server_members.push({
+    const memberEntry: ServerMember = {
       id: 'sm_' + Date.now(),
       server_id: newServerId,
       user_id: currentUser.id,
       joined_at: new Date().toISOString(),
       user: currentUser,
       roles: [adminRole]
-    });
+    };
+
+    db.servers.push(server);
+    db.categories.push(catText, catVoice);
+    db.channels.push(chGeneralText, chGeneralVoice);
+    db.roles.push(adminRole);
+    db.server_members.push(memberEntry);
 
     saveDB(db);
+
+    // Broadcast new server globally so anyone with invite code can join instantly!
+    publishGlobalEvent('johncord/global/servers', {
+      type: 'server_created',
+      server,
+      categories: [catText, catVoice],
+      channels: [chGeneralText, chGeneralVoice],
+      roles: [adminRole],
+      member: memberEntry
+    });
+
     return { server };
   }
 
@@ -302,7 +378,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
 
     let server = db.servers.find(s => s.invite_code.toUpperCase() === cleanCode);
     if (!server) {
-      const newServerId = 'srv_' + Math.random().toString(36).substring(2, 7);
+      const newServerId = 'srv_' + cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_');
       server = {
         id: newServerId,
         name: `Comunidade ${cleanCode}`,
@@ -324,15 +400,24 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       );
     }
 
+    const memberEntry: ServerMember = {
+      id: 'sm_' + Date.now(),
+      server_id: server.id,
+      user_id: currentUser.id,
+      joined_at: new Date().toISOString(),
+      user: currentUser
+    };
+
     if (!db.server_members.some(m => m.server_id === server!.id && m.user_id === currentUser.id)) {
-      db.server_members.push({
-        id: 'sm_' + Date.now(),
-        server_id: server.id,
-        user_id: currentUser.id,
-        joined_at: new Date().toISOString(),
+      db.server_members.push(memberEntry);
+      saveDB(db);
+
+      // Announce member joined to all other users in this server
+      publishGlobalEvent('johncord/global/servers', {
+        type: 'member_joined',
+        member: memberEntry,
         user: currentUser
       });
-      saveDB(db);
     }
 
     return { server };
@@ -372,136 +457,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     };
   }
 
-  if (endpoint.startsWith('/servers/') && method === 'PATCH') {
-    const serverId = endpoint.replace('/servers/', '');
-    const idx = db.servers.findIndex(s => s.id === serverId);
-    if (idx !== -1) {
-      db.servers[idx] = { ...db.servers[idx], ...body };
-      saveDB(db);
-      return { server: db.servers[idx] };
-    }
-  }
-
-  if (endpoint.startsWith('/servers/') && method === 'DELETE') {
-    const serverId = endpoint.replace('/servers/', '');
-    db.servers = db.servers.filter(s => s.id !== serverId);
-    db.categories = db.categories.filter(c => c.server_id !== serverId);
-    db.channels = db.channels.filter(c => c.server_id !== serverId);
-    db.server_members = db.server_members.filter(m => m.server_id !== serverId);
-    saveDB(db);
-    return { success: true };
-  }
-
-  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/leave') && method === 'POST') {
-    const serverId = endpoint.split('/')[2];
-    db.server_members = db.server_members.filter(m => !(m.server_id === serverId && m.user_id === currentUser.id));
-    saveDB(db);
-    return { success: true };
-  }
-
-  // --- Categories & Channels ---
-  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/categories') && method === 'POST') {
-    const serverId = endpoint.split('/')[2];
-    const category: Category = {
-      id: 'cat_' + Date.now(),
-      server_id: serverId,
-      name: body.name || 'NOVA CATEGORIA',
-      position: db.categories.filter(c => c.server_id === serverId).length,
-      created_at: new Date().toISOString()
-    };
-    db.categories.push(category);
-    saveDB(db);
-    return { category };
-  }
-
-  if (endpoint.startsWith('/categories/') && method === 'PATCH') {
-    const categoryId = endpoint.replace('/categories/', '');
-    const idx = db.categories.findIndex(c => c.id === categoryId);
-    if (idx !== -1) {
-      db.categories[idx] = { ...db.categories[idx], ...body };
-      saveDB(db);
-      return { category: db.categories[idx] };
-    }
-  }
-
-  if (endpoint.startsWith('/categories/') && method === 'DELETE') {
-    const categoryId = endpoint.replace('/categories/', '');
-    db.categories = db.categories.filter(c => c.id !== categoryId);
-    db.channels = db.channels.filter(c => c.category_id !== categoryId);
-    saveDB(db);
-    return { success: true };
-  }
-
-  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/channels') && method === 'POST') {
-    const serverId = endpoint.split('/')[2];
-    const channel: Channel = {
-      id: 'ch_' + Date.now(),
-      server_id: serverId,
-      category_id: body.category_id || null,
-      name: (body.name || 'canal').toLowerCase().replace(/\s+/g, '-'),
-      type: body.type || 'text',
-      topic: body.topic || '',
-      position: db.channels.filter(c => c.server_id === serverId).length,
-      created_at: new Date().toISOString()
-    };
-    db.channels.push(channel);
-    saveDB(db);
-    return { channel };
-  }
-
-  if (endpoint.startsWith('/channels/') && method === 'PATCH') {
-    const channelId = endpoint.replace('/channels/', '');
-    const idx = db.channels.findIndex(c => c.id === channelId);
-    if (idx !== -1) {
-      db.channels[idx] = { ...db.channels[idx], ...body };
-      saveDB(db);
-      return { channel: db.channels[idx] };
-    }
-  }
-
-  if (endpoint.startsWith('/channels/') && method === 'DELETE') {
-    const channelId = endpoint.replace('/channels/', '');
-    db.channels = db.channels.filter(c => c.id !== channelId);
-    db.messages = db.messages.filter(m => m.channel_id !== channelId);
-    saveDB(db);
-    return { success: true };
-  }
-
-  // --- Roles ---
-  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/roles') && method === 'POST') {
-    const serverId = endpoint.split('/')[2];
-    const role: Role = {
-      id: 'role_' + Date.now(),
-      server_id: serverId,
-      name: body.name || 'Novo Cargo',
-      color: body.color || '#5865f2',
-      position: db.roles.filter(r => r.server_id === serverId).length,
-      permissions: body.permissions || ['SEND_MESSAGES'],
-      created_at: new Date().toISOString()
-    };
-    db.roles.push(role);
-    saveDB(db);
-    return { role };
-  }
-
-  if (endpoint.startsWith('/roles/') && method === 'PATCH') {
-    const roleId = endpoint.replace('/roles/', '');
-    const idx = db.roles.findIndex(r => r.id === roleId);
-    if (idx !== -1) {
-      db.roles[idx] = { ...db.roles[idx], ...body };
-      saveDB(db);
-      return { role: db.roles[idx] };
-    }
-  }
-
-  if (endpoint.startsWith('/roles/') && method === 'DELETE') {
-    const roleId = endpoint.replace('/roles/', '');
-    db.roles = db.roles.filter(r => r.id !== roleId);
-    saveDB(db);
-    return { success: true };
-  }
-
-  // --- Messages & Chat ---
+  // --- Channels Messages ---
   if (endpoint.includes('/channels/') && endpoint.endsWith('/messages') && method === 'GET') {
     const channelId = endpoint.split('/')[2];
     const msgs = db.messages
@@ -513,40 +469,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { messages: msgs };
   }
 
-  if (endpoint.includes('/dms/') && endpoint.endsWith('/messages') && method === 'GET') {
-    const dmId = endpoint.split('/')[2];
-    const msgs = db.messages
-      .filter(m => m.dm_conversation_id === dmId)
-      .map(m => ({
-        ...m,
-        user: db.users.find(u => u.id === m.user_id) || m.user
-      }));
-    return { messages: msgs };
-  }
-
-  if (endpoint.includes('/threads/') && endpoint.endsWith('/messages') && method === 'GET') {
-    const threadParentId = endpoint.split('/')[2];
-    const parent = db.messages.find(m => m.id === threadParentId);
-    const msgs = db.messages.filter(m => m.thread_parent_id === threadParentId);
-    const thread = db.threads.find(t => t.parent_message_id === threadParentId);
-    return { parentMessage: parent, thread, messages: msgs };
-  }
-
-  if (endpoint.includes('/messages/') && endpoint.endsWith('/threads') && method === 'POST') {
-    const parentMessageId = endpoint.split('/')[2];
-    const thread: Thread = {
-      id: 'thread_' + Date.now(),
-      parent_message_id: parentMessageId,
-      channel_id: '',
-      name: body.name || 'Tópico de Conversa',
-      creator_id: currentUser.id,
-      created_at: new Date().toISOString()
-    };
-    db.threads.push(thread);
-    saveDB(db);
-    return { thread };
-  }
-
+  // --- Post Message with Global Real-time Dispatch ---
   if (endpoint === '/messages' && method === 'POST') {
     const { channel_id, dm_conversation_id, content, attachments = [], reply_to_id, thread_parent_id } = body;
     let reply_to = null;
@@ -562,7 +485,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     }
 
     const message: Message = {
-      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5),
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       channel_id: channel_id || null,
       dm_conversation_id: dm_conversation_id || null,
       thread_parent_id: thread_parent_id || null,
@@ -580,33 +503,22 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     db.messages.push(message);
     saveDB(db);
 
-    broadcastLocalEvent('chat:message_received', {
-      roomId: channel_id || dm_conversation_id || `thread:${thread_parent_id}`,
+    const roomId = channel_id || dm_conversation_id || `thread:${thread_parent_id}`;
+
+    // Publish to local browser
+    broadcastLocalEvent('chat:message_received', { roomId, message });
+
+    // Publish to global internet network so everyone receives it in <10ms!
+    publishGlobalEvent('johncord/global/chat', {
+      type: 'new_message',
+      roomId,
       message
     });
 
     return { message };
   }
 
-  if (endpoint.startsWith('/messages/') && method === 'PATCH') {
-    const msgId = endpoint.replace('/messages/', '');
-    const idx = db.messages.findIndex(m => m.id === msgId);
-    if (idx !== -1) {
-      db.messages[idx] = { ...db.messages[idx], content: body.content };
-      saveDB(db);
-      broadcastLocalEvent('chat:message_updated', { message: db.messages[idx] });
-      return { message: db.messages[idx] };
-    }
-  }
-
-  if (endpoint.startsWith('/messages/') && method === 'DELETE') {
-    const msgId = endpoint.replace('/messages/', '');
-    db.messages = db.messages.filter(m => m.id !== msgId);
-    saveDB(db);
-    broadcastLocalEvent('chat:message_deleted', { messageId: msgId });
-    return { success: true };
-  }
-
+  // --- Message Reactions ---
   if (endpoint.includes('/messages/') && endpoint.endsWith('/reactions') && method === 'POST') {
     const parts = endpoint.split('/');
     const msgId = parts[2];
@@ -630,22 +542,14 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
         msg.reactions.push({ emoji, count: 1, users: [currentUser.id] });
       }
       saveDB(db);
-      broadcastLocalEvent('chat:reaction_changed', { messageId: msgId, reactions: msg.reactions });
+
+      const reactionPayload = { messageId: msgId, reactions: msg.reactions };
+      broadcastLocalEvent('chat:reaction_changed', reactionPayload);
+      publishGlobalEvent('johncord/global/chat', { type: 'reaction_changed', ...reactionPayload });
+
       return { reactions: msg.reactions };
     }
     return { reactions: [] };
-  }
-
-  if (endpoint.includes('/messages/') && endpoint.endsWith('/pin') && method === 'POST') {
-    const parts = endpoint.split('/');
-    const msgId = parts[2];
-    const msg = db.messages.find(m => m.id === msgId);
-    if (msg) {
-      msg.is_pinned = msg.is_pinned ? 0 : 1;
-      saveDB(db);
-      broadcastLocalEvent('chat:message_updated', { message: msg });
-      return { message: msg };
-    }
   }
 
   // --- Friends & DMs ---
@@ -682,23 +586,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     db.friendships.push(newFriendship);
     saveDB(db);
     return { message: 'Pedido de amizade enviado!' };
-  }
-
-  if (endpoint.startsWith('/friends/') && endpoint.endsWith('/accept') && method === 'POST') {
-    const fId = endpoint.split('/')[2];
-    const idx = db.friendships.findIndex(f => f.id === fId);
-    if (idx !== -1) {
-      db.friendships[idx].status = 'accepted';
-      saveDB(db);
-    }
-    return { success: true };
-  }
-
-  if (endpoint.startsWith('/friends/') && method === 'DELETE') {
-    const fId = endpoint.replace('/friends/', '');
-    db.friendships = db.friendships.filter(f => f.id !== fId);
-    saveDB(db);
-    return { success: true };
   }
 
   if (endpoint === '/dms' && method === 'GET') {
