@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { subscribeLocalEvents } from './mockBackend';
 
 let socket: Socket | null = null;
 
@@ -10,8 +11,9 @@ export function getSocket(): Socket {
     socket = io(socketHost, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      timeout: 3000
     });
 
     socket.on('connect', () => {
@@ -25,8 +27,15 @@ export function getSocket(): Socket {
       }
     });
 
-    socket.on('disconnect', () => {
-      console.log('🔌 Disconnected from Johncord Socket.IO Server');
+    socket.on('connect_error', () => {
+      // Gracefully silent in standalone Netlify mode
+    });
+
+    // Bridge local broadcast events for standalone mode (Netlify / offline)
+    subscribeLocalEvents((event, data) => {
+      if (socket) {
+        (socket as any)._callbacks?.[`$${event}`]?.forEach((cb: Function) => cb(data));
+      }
     });
   }
 

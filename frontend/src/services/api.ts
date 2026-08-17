@@ -1,3 +1,5 @@
+import { handleMockAPI } from './mockBackend';
+
 const BASE_BACKEND_URL = (import.meta as any).env?.VITE_API_URL || '';
 const API_URL = BASE_BACKEND_URL ? (BASE_BACKEND_URL.endsWith('/api') ? BASE_BACKEND_URL : `${BASE_BACKEND_URL}/api`) : '/api';
 
@@ -18,21 +20,43 @@ export async function apiRequest<T = any>(
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers
-  });
+  try {
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers
+    });
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/guest')) {
-      localStorage.removeItem('johncord_token');
-      localStorage.removeItem('johncord_user');
-      window.location.reload();
+    const contentType = response.headers.get('content-type') || '';
+    
+    // If the server returned HTML (e.g. Netlify 404 SPA fallback), fallback to client mock DB
+    if (contentType.includes('text/html') || !contentType.includes('application/json')) {
+      console.warn(`[Johncord] Backend at ${API_URL} returned HTML instead of JSON. Falling back to in-browser demo database for ${endpoint}`);
+      return await handleMockAPI(endpoint, options);
     }
-    throw new Error(data.error || 'Erro na requisição.');
-  }
 
-  return data;
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/guest')) {
+        localStorage.removeItem('johncord_token');
+        localStorage.removeItem('johncord_user');
+        window.location.reload();
+      }
+      throw new Error(data.error || 'Erro na requisição.');
+    }
+
+    return data;
+  } catch (err: any) {
+    // If network failed (no backend running on host), seamlessly handle via mock database
+    if (
+      err.message?.includes('Unexpected token') ||
+      err.message?.includes('Failed to fetch') ||
+      err.message?.includes('NetworkError') ||
+      err.message?.includes('is not valid JSON')
+    ) {
+      console.warn(`[Johncord] Network or parse error for ${endpoint}. Using in-browser mock database.`);
+      return await handleMockAPI(endpoint, options);
+    }
+    throw err;
+  }
 }
