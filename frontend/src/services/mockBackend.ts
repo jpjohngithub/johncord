@@ -14,7 +14,7 @@ interface LocalDB {
   dm_members: { id: string; dm_conversation_id: string; user_id: string }[];
 }
 
-const DB_KEY = 'johncord_mock_db_v1';
+const DB_KEY = 'johncord_clean_db_v2';
 
 function createInitialDB(): LocalDB {
   const botUser: User = {
@@ -25,7 +25,7 @@ function createInitialDB(): LocalDB {
     avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=JohnBot',
     banner_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
     bio: '🤖 Olá! Eu sou o JohnBot, assistente do Johncord.',
-    custom_status: 'Codando o Johncord 🚀',
+    custom_status: 'Online no Johncord 🚀',
     presence: 'online',
     created_at: new Date().toISOString()
   };
@@ -37,193 +37,46 @@ function createInitialDB(): LocalDB {
     email: 'dev@johncord.gg',
     avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=JohnDev',
     banner_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80',
-    bio: 'Criador e desenvolvedor do Johncord! Apaixonado por tecnologia e comunicação em tempo real.',
-    custom_status: 'Ouvindo música 🎧',
+    bio: 'Criador e desenvolvedor do Johncord!',
+    custom_status: 'Codando 🎧',
     presence: 'online',
     created_at: new Date().toISOString()
   };
 
-  const anaUser: User = {
-    id: 'user_ana',
-    username: 'AnaGamer',
-    tag: '4040',
-    email: 'ana@johncord.gg',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=AnaGamer',
-    banner_url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80',
-    bio: 'Streamer e pro player 🎮 Sempre pronta pra uma jogatina no Johncord!',
-    custom_status: 'Jogando Valorant 🎯',
-    presence: 'idle',
-    created_at: new Date().toISOString()
-  };
-
-  const lucasUser: User = {
-    id: 'user_lucas',
-    username: 'LucasVFX',
-    tag: '8888',
-    email: 'lucas@johncord.gg',
-    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=LucasVFX',
-    banner_url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80',
-    bio: 'Designer e Motion VFX 🎨',
-    custom_status: 'Renderizando vídeo 🎬',
-    presence: 'dnd',
-    created_at: new Date().toISOString()
-  };
-
-  const serverId = 'srv_oficial';
-  const catTextId = 'cat_text_1';
-  const catVoiceId = 'cat_voice_1';
-
-  const chGeral: Channel = {
-    id: 'ch_geral',
-    server_id: serverId,
-    category_id: catTextId,
-    name: 'geral',
-    type: 'text',
-    topic: 'Canal principal para conversar sobre qualquer assunto.',
-    position: 0,
-    created_at: new Date().toISOString()
-  };
-
-  const chAnuncios: Channel = {
-    id: 'ch_anuncios',
-    server_id: serverId,
-    category_id: catTextId,
-    name: 'avisos-e-novidades',
-    type: 'text',
-    topic: 'Fique por dentro das atualizações do Johncord!',
-    position: 1,
-    created_at: new Date().toISOString()
-  };
-
-  const chDev: Channel = {
-    id: 'ch_dev',
-    server_id: serverId,
-    category_id: catTextId,
-    name: 'desenvolvimento',
-    type: 'text',
-    topic: 'Espaço para debater código, TypeScript, React e Node.',
-    position: 2,
-    created_at: new Date().toISOString()
-  };
-
-  const chVozGeral: Channel = {
-    id: 'ch_voz_geral',
-    server_id: serverId,
-    category_id: catVoiceId,
-    name: 'Lounge Principal',
-    type: 'voice',
-    position: 0,
-    created_at: new Date().toISOString()
-  };
-
-  const chVozGames: Channel = {
-    id: 'ch_voz_games',
-    server_id: serverId,
-    category_id: catVoiceId,
-    name: 'Jogatinas 🎮',
-    type: 'voice',
-    position: 1,
-    created_at: new Date().toISOString()
-  };
-
-  const server: Server = {
-    id: serverId,
-    name: 'Johncord Oficial',
-    icon_url: 'https://api.dicebear.com/7.x/identicon/svg?seed=JohncordOficial',
-    banner_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-    owner_id: devUser.id,
-    invite_code: 'JOHNCORD2026',
-    created_at: new Date().toISOString()
-  };
-
-  const roles: Role[] = [
-    { id: 'role_admin', server_id: serverId, name: 'Fundador / Admin', color: '#5865f2', position: 0, permissions: ['ADMINISTRATOR'], created_at: new Date().toISOString() },
-    { id: 'role_mod', server_id: serverId, name: 'Moderador', color: '#23a55a', position: 1, permissions: ['MANAGE_CHANNELS', 'KICK_MEMBERS'], created_at: new Date().toISOString() },
-    { id: 'role_vip', server_id: serverId, name: 'Membro VIP', color: '#f0b232', position: 2, permissions: ['SEND_MESSAGES'], created_at: new Date().toISOString() }
-  ];
-
-  const categories: Category[] = [
-    { id: catTextId, server_id: serverId, name: 'CANAIS DE TEXTO', position: 0, created_at: new Date().toISOString() },
-    { id: catVoiceId, server_id: serverId, name: 'CANAIS DE VOZ', position: 1, created_at: new Date().toISOString() }
-  ];
-
-  const members: ServerMember[] = [
-    { id: 'm_1', server_id: serverId, user_id: devUser.id, joined_at: new Date().toISOString(), user: devUser, roles: [roles[0]] },
-    { id: 'm_2', server_id: serverId, user_id: botUser.id, joined_at: new Date().toISOString(), user: botUser, roles: [roles[1]] },
-    { id: 'm_3', server_id: serverId, user_id: anaUser.id, joined_at: new Date().toISOString(), user: anaUser, roles: [roles[2]] },
-    { id: 'm_4', server_id: serverId, user_id: lucasUser.id, joined_at: new Date().toISOString(), user: lucasUser, roles: [] }
-  ];
-
-  const messages: Message[] = [
-    {
-      id: 'msg_1',
-      channel_id: 'ch_geral',
-      user_id: botUser.id,
-      content: '👋 Olá a todos! Bem-vindos ao **Johncord**, a plataforma de chat e voz idêntica ao Discord feita com React 19, TypeScript e Tailwind v4!',
-      attachments: [],
-      is_pinned: 1,
-      created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-      user: botUser,
-      reactions: [{ emoji: '🎉', count: 3, users: ['user_dev', 'user_ana', 'user_lucas'] }]
-    },
-    {
-      id: 'msg_2',
-      channel_id: 'ch_geral',
-      user_id: devUser.id,
-      content: 'Fala galera! O sistema de agrupamento de mensagens, salas de voz WebRTC e chamadas diretas já estão 100% operacionais.',
-      attachments: [],
-      is_pinned: 0,
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      user: devUser
-    },
-    {
-      id: 'msg_3',
-      channel_id: 'ch_geral',
-      user_id: anaUser.id,
-      content: 'Ficou incrível demais! O visual tá idêntico ao Discord original 😍',
-      attachments: [],
-      is_pinned: 0,
-      created_at: new Date(Date.now() - 1800000).toISOString(),
-      user: anaUser,
-      reactions: [{ emoji: '🔥', count: 2, users: ['user_dev', 'user_lucas'] }]
-    }
-  ];
-
+  // Start with clean server list (0 servers pre-assigned)
   return {
-    users: [botUser, devUser, anaUser, lucasUser],
-    servers: [server],
-    categories,
-    channels: [chGeral, chAnuncios, chDev, chVozGeral, chVozGames],
-    roles,
-    server_members: members,
-    messages,
+    users: [botUser, devUser],
+    servers: [],
+    categories: [],
+    channels: [],
+    roles: [],
+    server_members: [],
+    messages: [],
     threads: [],
     friendships: [
-      { id: 'f_1', sender_id: devUser.id, receiver_id: botUser.id, status: 'accepted', created_at: new Date().toISOString() },
-      { id: 'f_2', sender_id: devUser.id, receiver_id: anaUser.id, status: 'accepted', created_at: new Date().toISOString() },
-      { id: 'f_3', sender_id: devUser.id, receiver_id: lucasUser.id, status: 'accepted', created_at: new Date().toISOString() }
+      { id: 'f_1', sender_id: devUser.id, receiver_id: botUser.id, status: 'accepted', created_at: new Date().toISOString() }
     ],
     dm_conversations: [
       {
-        id: 'dm_dev_ana',
+        id: 'dm_dev_bot',
         is_group: 0,
         created_at: new Date().toISOString(),
-        members: [devUser, anaUser],
+        members: [devUser, botUser],
         last_message: {
           id: 'dm_msg_1',
-          dm_conversation_id: 'dm_dev_ana',
-          user_id: anaUser.id,
-          content: 'E aí John! Bora testar a sala de voz depois?',
+          dm_conversation_id: 'dm_dev_bot',
+          user_id: botUser.id,
+          content: '👋 Olá! Crie seu próprio servidor clicando no botão **"+"** à esquerda ou entre em um servidor pelo link de convite!',
           attachments: [],
           is_pinned: 0,
-          created_at: new Date(Date.now() - 900000).toISOString(),
-          user: anaUser
+          created_at: new Date().toISOString(),
+          user: botUser
         }
       }
     ],
     dm_members: [
-      { id: 'dmm_1', dm_conversation_id: 'dm_dev_ana', user_id: devUser.id },
-      { id: 'dmm_2', dm_conversation_id: 'dm_dev_ana', user_id: anaUser.id }
+      { id: 'dmm_1', dm_conversation_id: 'dm_dev_bot', user_id: devUser.id },
+      { id: 'dmm_2', dm_conversation_id: 'dm_dev_bot', user_id: botUser.id }
     ]
   };
 }
@@ -274,20 +127,19 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
   const db = getDB();
 
   const currentUserStr = localStorage.getItem('johncord_user');
-  let currentUser: User = db.users[1]; // default to JohnDev
+  let currentUser: User = db.users[1] || db.users[0];
   if (currentUserStr) {
     try { currentUser = JSON.parse(currentUserStr); } catch (e) {}
   }
 
-  // Helper delay to feel natural
-  await new Promise(r => setTimeout(r, 50));
+  // Small delay for natural UX
+  await new Promise(r => setTimeout(r, 40));
 
   // Auth Routes
   if (endpoint === '/auth/login' && method === 'POST') {
     const { email } = body;
     let user = db.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
     if (!user) {
-      // Auto-create or fallback to matching user
       const name = (email || 'Usuario').split('@')[0];
       user = {
         id: 'usr_' + Date.now(),
@@ -316,14 +168,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       created_at: new Date().toISOString()
     };
     db.users.push(user);
-    // Add default server membership
-    db.server_members.push({
-      id: 'sm_' + Date.now(),
-      server_id: 'srv_oficial',
-      user_id: user.id,
-      joined_at: new Date().toISOString(),
-      user
-    });
     saveDB(db);
     return { token: 'mock_jwt_token_' + user.id, user };
   }
@@ -340,19 +184,12 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       created_at: new Date().toISOString()
     };
     db.users.push(user);
-    db.server_members.push({
-      id: 'sm_' + Date.now(),
-      server_id: 'srv_oficial',
-      user_id: user.id,
-      joined_at: new Date().toISOString(),
-      user
-    });
     saveDB(db);
     return { token: 'mock_jwt_token_' + user.id, user };
   }
 
   if (endpoint === '/auth/me' && method === 'GET') {
-    const found = db.users.find(u => u.id === currentUser.id) || db.users[1];
+    const found = db.users.find(u => u.id === currentUser.id) || currentUser;
     return { user: found };
   }
 
@@ -366,59 +203,155 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { user: currentUser };
   }
 
-  // Servers
+  // Get My Servers (Only servers the user has created or joined!)
   if (endpoint === '/servers' && method === 'GET') {
-    return { servers: db.servers };
+    const myServerIds = db.server_members.filter(m => m.user_id === currentUser.id).map(m => m.server_id);
+    const myServers = db.servers.filter(s => myServerIds.includes(s.id));
+    return { servers: myServers };
   }
 
+  // Create Server
   if (endpoint === '/servers' && method === 'POST') {
     const { name, icon_url } = body;
     const newServerId = 'srv_' + Date.now();
-    const newCatId = 'cat_' + Date.now();
-    const newChId = 'ch_' + Date.now();
+    const newCatTextId = 'cat_text_' + Date.now();
+    const newCatVoiceId = 'cat_voice_' + Date.now();
+    const inviteCode = 'JC-' + Math.random().toString(36).substring(2, 7).toUpperCase();
 
     const server: Server = {
       id: newServerId,
-      name: name || 'Novo Servidor',
+      name: name || 'Meu Servidor',
       icon_url: icon_url || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(name || 'Server')}`,
       owner_id: currentUser.id,
-      invite_code: 'JC' + Math.random().toString(36).substring(2, 7).toUpperCase(),
+      invite_code: inviteCode,
       created_at: new Date().toISOString()
     };
 
-    const category: Category = {
-      id: newCatId,
+    const catText: Category = {
+      id: newCatTextId,
       server_id: newServerId,
-      name: 'GERAL',
+      name: 'CANAIS DE TEXTO',
       position: 0,
       created_at: new Date().toISOString()
     };
 
-    const channel: Channel = {
-      id: newChId,
+    const catVoice: Category = {
+      id: newCatVoiceId,
       server_id: newServerId,
-      category_id: newCatId,
+      name: 'CANAIS DE VOZ',
+      position: 1,
+      created_at: new Date().toISOString()
+    };
+
+    const chGeneralText: Channel = {
+      id: 'ch_text_' + Date.now(),
+      server_id: newServerId,
+      category_id: newCatTextId,
       name: 'geral',
       type: 'text',
-      topic: 'Canal de texto principal',
+      topic: 'Canal principal para conversar por texto.',
       position: 0,
+      created_at: new Date().toISOString()
+    };
+
+    const chGeneralVoice: Channel = {
+      id: 'ch_voice_' + Date.now(),
+      server_id: newServerId,
+      category_id: newCatVoiceId,
+      name: 'Sala de Voz 🔊',
+      type: 'voice',
+      position: 0,
+      created_at: new Date().toISOString()
+    };
+
+    const adminRole: Role = {
+      id: 'role_admin_' + Date.now(),
+      server_id: newServerId,
+      name: 'Dono / Admin',
+      color: '#5865f2',
+      position: 0,
+      permissions: ['ADMINISTRATOR'],
       created_at: new Date().toISOString()
     };
 
     db.servers.push(server);
-    db.categories.push(category);
-    db.channels.push(channel);
+    db.categories.push(catText, catVoice);
+    db.channels.push(chGeneralText, chGeneralVoice);
+    db.roles.push(adminRole);
     db.server_members.push({
       id: 'sm_' + Date.now(),
       server_id: newServerId,
       user_id: currentUser.id,
       joined_at: new Date().toISOString(),
-      user: currentUser
+      user: currentUser,
+      roles: [adminRole]
     });
+
     saveDB(db);
     return { server };
   }
 
+  // Join Server by Invite Link or Code
+  if (endpoint === '/servers/join' && method === 'POST') {
+    const { inviteCode } = body;
+    let cleanCode = (inviteCode || '').trim();
+    
+    // Extract code if user pasted a full URL
+    if (cleanCode.includes('invite=')) {
+      cleanCode = cleanCode.split('invite=')[1].split('&')[0];
+    } else if (cleanCode.includes('join=')) {
+      cleanCode = cleanCode.split('join=')[1].split('&')[0];
+    } else if (cleanCode.includes('/')) {
+      const parts = cleanCode.split('/').filter(Boolean);
+      cleanCode = parts[parts.length - 1];
+    }
+
+    cleanCode = cleanCode.toUpperCase();
+
+    let server = db.servers.find(s => s.invite_code.toUpperCase() === cleanCode);
+    
+    // If not existing in DB, create server for this code
+    if (!server) {
+      const newServerId = 'srv_' + Math.random().toString(36).substring(2, 7);
+      server = {
+        id: newServerId,
+        name: `Comunidade ${cleanCode}`,
+        icon_url: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(cleanCode)}`,
+        owner_id: currentUser.id,
+        invite_code: cleanCode,
+        created_at: new Date().toISOString()
+      };
+      
+      const catTextId = 'cat_text_' + Date.now();
+      const catVoiceId = 'cat_voice_' + Date.now();
+      
+      db.servers.push(server);
+      db.categories.push(
+        { id: catTextId, server_id: newServerId, name: 'CANAIS DE TEXTO', position: 0, created_at: new Date().toISOString() },
+        { id: catVoiceId, server_id: newServerId, name: 'CANAIS DE VOZ', position: 1, created_at: new Date().toISOString() }
+      );
+      db.channels.push(
+        { id: 'ch_' + Date.now() + '_1', server_id: newServerId, category_id: catTextId, name: 'geral', type: 'text', position: 0, created_at: new Date().toISOString() },
+        { id: 'ch_' + Date.now() + '_2', server_id: newServerId, category_id: catVoiceId, name: 'Sala de Voz 🔊', type: 'voice', position: 1, created_at: new Date().toISOString() }
+      );
+    }
+
+    // Add currentUser as member
+    if (!db.server_members.some(m => m.server_id === server!.id && m.user_id === currentUser.id)) {
+      db.server_members.push({
+        id: 'sm_' + Date.now(),
+        server_id: server.id,
+        user_id: currentUser.id,
+        joined_at: new Date().toISOString(),
+        user: currentUser
+      });
+      saveDB(db);
+    }
+
+    return { server };
+  }
+
+  // Get Server Details
   if (endpoint.startsWith('/servers/') && method === 'GET') {
     const serverId = endpoint.replace('/servers/', '');
     const server = db.servers.find(s => s.id === serverId);
@@ -434,7 +367,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
         user: db.users.find(u => u.id === m.user_id) || m.user
       }));
 
-    // Attach channels to categories
     const categoriesWithChannels = categories.map(cat => ({
       ...cat,
       channels: channels.filter(ch => ch.category_id === cat.id)
@@ -454,6 +386,15 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     };
   }
 
+  // Leave Server
+  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/leave') && method === 'POST') {
+    const serverId = endpoint.split('/')[2];
+    db.server_members = db.server_members.filter(m => !(m.server_id === serverId && m.user_id === currentUser.id));
+    saveDB(db);
+    return { success: true };
+  }
+
+  // Create Category
   if (endpoint.startsWith('/servers/') && endpoint.endsWith('/categories') && method === 'POST') {
     const serverId = endpoint.split('/')[2];
     const category: Category = {
@@ -468,6 +409,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { category };
   }
 
+  // Create Channel
   if (endpoint.startsWith('/servers/') && endpoint.endsWith('/channels') && method === 'POST') {
     const serverId = endpoint.split('/')[2];
     const channel: Channel = {
@@ -643,6 +585,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { conversation: conv };
   }
 
-  // Fallback default
+  // Fallback
   return { success: true };
 }

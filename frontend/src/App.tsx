@@ -36,12 +36,12 @@ import { User } from './types';
 
 export const App: React.FC = () => {
   const { user, token, isLoading: isAuthLoading, initializeAuth } = useAuthStore();
-  const { currentServerId, currentChannel, loadServers } = useServerStore();
+  const { currentServerId, currentChannel, loadServers, joinServer } = useServerStore();
   const { currentDMId, loadFriends, loadDMs, setupFriendSocketListeners } = useFriendStore();
   const { setupSocketListeners } = useChatStore();
   const { currentVoiceChannel, setupVoiceSocketListeners } = useVoiceStore();
 
-  // Initialize WebRTC signaling and microphone volume analyser
+  // Initialize WebRTC audio mesh and microphone volume analyser
   useWebRTC();
 
   const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
@@ -58,6 +58,19 @@ export const App: React.FC = () => {
       loadServers();
       loadFriends();
       loadDMs();
+
+      // Check if user arrived via an invite URL (?invite=CODE or ?join=CODE or /join/CODE)
+      const params = new URLSearchParams(window.location.search);
+      const inviteParam = params.get('invite') || params.get('join');
+      const pathInvite = window.location.pathname.match(/\/invite\/([A-Za-z0-9_-]+)/)?.[1] || window.location.pathname.match(/\/join\/([A-Za-z0-9_-]+)/)?.[1];
+      const code = inviteParam || pathInvite;
+
+      if (code) {
+        console.log(`🔗 [Johncord Invite] Auto-joining server with invite code: ${code}`);
+        joinServer(code).then(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }).catch((e) => console.warn('Invite join error:', e));
+      }
 
       const cleanupChat = setupSocketListeners();
       const cleanupFriends = setupFriendSocketListeners();

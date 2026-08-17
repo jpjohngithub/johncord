@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { Sparkles, MessageSquare, Zap, Shield, Headphones, MonitorPlay, LogIn, UserPlus } from 'lucide-react';
+import { Sparkles, MessageSquare, Zap, Shield, Headphones, MonitorPlay, LogIn, UserPlus, Compass } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
   const [isRegister, setIsRegister] = useState(false);
@@ -8,8 +8,17 @@ export const AuthScreen: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
 
   const { login, register, quickGuest, isLoading, error } = useAuthStore();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('invite') || params.get('join') || window.location.pathname.match(/\/invite\/([A-Za-z0-9_-]+)/)?.[1] || window.location.pathname.match(/\/join\/([A-Za-z0-9_-]+)/)?.[1];
+    if (code) {
+      setInviteCode(code);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,14 +65,31 @@ export const AuthScreen: React.FC = () => {
               </div>
               <span className="text-2xl font-black tracking-tight text-white">Johncord</span>
             </div>
-            <h1 className="text-xl font-bold text-white">
-              {isRegister ? 'Crie sua conta Johncord' : 'Boas-vindas de volta!'}
-            </h1>
-            <p className="text-sm text-[#949ba4] mt-1">
-              {isRegister
-                ? 'Conecte-se com amigos, jogue e converse em alta qualidade.'
-                : 'Estamos muito animados em ver você de novo!'}
-            </p>
+
+            {inviteCode ? (
+              <div className="mb-4 rounded-lg bg-[#5865f2]/20 border border-[#5865f2]/50 p-3 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-[#5865f2] uppercase tracking-wider mb-1">
+                  <Compass className="h-4 w-4" /> Convite para Servidor
+                </div>
+                <div className="text-sm font-semibold text-white">
+                  Você foi convidado para entrar no servidor!
+                </div>
+                <div className="text-xs text-[#dbdee1] mt-0.5">
+                  Código: <span className="font-mono font-bold text-white bg-[#1e1f22] px-1.5 py-0.5 rounded">{inviteCode}</span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <h1 className="text-xl font-bold text-white">
+                  {isRegister ? 'Crie sua conta Johncord' : 'Boas-vindas de volta!'}
+                </h1>
+                <p className="text-sm text-[#949ba4] mt-1">
+                  {isRegister
+                    ? 'Conecte-se com amigos, jogue e converse em alta qualidade.'
+                    : 'Estamos muito animados em ver você de novo!'}
+                </p>
+              </>
+            )}
           </div>
 
           {(error || localError) && (
@@ -121,39 +147,39 @@ export const AuthScreen: React.FC = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full rounded-sm bg-[#5865f2] hover:bg-[#4752c4] active:bg-[#3c45a5] py-3 text-sm font-semibold text-white shadow transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full rounded-sm bg-[#5865f2] p-3 text-sm font-medium text-white transition hover:bg-[#4752c4] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-lg shadow-[#5865f2]/25"
             >
               {isLoading ? (
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <span className="inline-flex items-center gap-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Carregando...
+                </span>
               ) : isRegister ? (
-                <>
-                  <UserPlus className="h-4 w-4" /> Cadastrar Conta
-                </>
+                <span className="inline-flex items-center gap-2">
+                  <UserPlus className="h-4 w-4" /> Continuar
+                </span>
               ) : (
-                <>
+                <span className="inline-flex items-center gap-2">
                   <LogIn className="h-4 w-4" /> Entrar
-                </>
+                </span>
               )}
             </button>
-          </form>
 
-          {/* Quick Guest Mode Button for Instant Pairing/Testing */}
-          <div className="mt-4 pt-4 border-t border-[#3f4147]">
+            {/* Quick Guest Access */}
             <button
               type="button"
               onClick={handleQuickGuest}
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 rounded-sm bg-[#2b2d31] hover:bg-[#383a40] text-emerald-400 border border-emerald-500/30 py-2.5 text-sm font-medium transition cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 rounded-sm border border-[#23a55a]/40 bg-[#23a55a]/10 p-3 text-sm font-medium text-[#23a55a] transition hover:bg-[#23a55a]/20 cursor-pointer"
             >
-              <Zap className="h-4 w-4 text-emerald-400" />
-              Entrar como Convidado Rápido (1-Clique)
+              <Zap className="h-4 w-4" /> Entrar como Convidado Rápido (1-Clique)
             </button>
-          </div>
+          </form>
 
-          {/* Switch Register / Login */}
-          <div className="mt-4 text-left text-xs text-[#949ba4]">
+          {/* Toggle between Login and Register */}
+          <div className="mt-6 text-center text-xs text-[#949ba4]">
             {isRegister ? (
-              <span>
+              <>
                 Já tem uma conta?{' '}
                 <button
                   type="button"
@@ -161,13 +187,13 @@ export const AuthScreen: React.FC = () => {
                     setIsRegister(false);
                     setLocalError('');
                   }}
-                  className="text-[#00a8fc] hover:underline font-medium cursor-pointer"
+                  className="font-semibold text-[#00a8fc] hover:underline cursor-pointer"
                 >
                   Entrar
                 </button>
-              </span>
+              </>
             ) : (
-              <span>
+              <>
                 Precisando de uma conta?{' '}
                 <button
                   type="button"
@@ -175,62 +201,57 @@ export const AuthScreen: React.FC = () => {
                     setIsRegister(true);
                     setLocalError('');
                   }}
-                  className="text-[#00a8fc] hover:underline font-medium cursor-pointer"
+                  className="font-semibold text-[#00a8fc] hover:underline cursor-pointer"
                 >
                   Registre-se
                 </button>
-              </span>
+              </>
             )}
           </div>
         </div>
 
-        {/* Right Side: Showcase Features */}
-        <div className="hidden lg:flex lg:w-96 flex-col justify-between bg-[#2b2d31] p-8 border-l border-[#3f4147]">
+        {/* Right Side: Feature showcase */}
+        <div className="hidden lg:flex lg:w-96 flex-col justify-between bg-[#2b2d31] p-8 border-l border-[#232428]">
           <div>
-            <div className="flex items-center gap-2 text-white font-bold text-sm uppercase tracking-wider mb-4 text-[#5865f2]">
-              <Sparkles className="h-4 w-4" />
-              Tudo em um só lugar
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-[#5865f2]">
+              <Sparkles className="h-4 w-4" /> Experiência Completa
             </div>
+            <h3 className="mt-2 text-xl font-bold text-white leading-snug">
+              Comunique-se em tempo real sem limites
+            </h3>
+            <p className="mt-2 text-xs text-[#949ba4] leading-relaxed">
+              Canais de voz WebRTC de baixa latência, detecção de voz em tempo real e compartilhamento de tela.
+            </p>
 
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="p-2 rounded bg-[#1e1f22] text-[#5865f2]">
-                  <Headphones className="h-4 w-4" />
-                </div>
+            <div className="mt-6 space-y-3">
+              <div className="flex items-start gap-3 rounded bg-[#1e1f22]/70 p-2.5 border border-white/5">
+                <Headphones className="h-5 w-5 text-[#23a55a] shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold text-white">Voz e Vídeo em Tempo Real</h4>
-                  <p className="text-[11px] text-[#949ba4]">Salas de alta qualidade, sem atraso e com detecção de fala.</p>
+                  <div className="text-xs font-bold text-white">Voz e Vídeo WebRTC</div>
+                  <div className="text-[11px] text-[#949ba4]">Áudio de alta qualidade e anel de fala verde ao vivo.</div>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="p-2 rounded bg-[#1e1f22] text-amber-400">
-                  <MonitorPlay className="h-4 w-4" />
-                </div>
+              <div className="flex items-start gap-3 rounded bg-[#1e1f22]/70 p-2.5 border border-white/5">
+                <Compass className="h-5 w-5 text-[#5865f2] shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold text-white">Transmissão de Tela HD</h4>
-                  <p className="text-[11px] text-[#949ba4]">Compartilhe jogos, abas e vídeos com sua comunidade.</p>
+                  <div className="text-xs font-bold text-white">Convites por URL</div>
+                  <div className="text-[11px] text-[#949ba4]">Convide amigos com 1 link e conversem instantaneamente.</div>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <div className="p-2 rounded bg-[#1e1f22] text-emerald-400">
-                  <Shield className="h-4 w-4" />
-                </div>
+              <div className="flex items-start gap-3 rounded bg-[#1e1f22]/70 p-2.5 border border-white/5">
+                <Shield className="h-5 w-5 text-[#f0b232] shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold text-white">Cargos e Comunidades</h4>
-                  <p className="text-[11px] text-[#949ba4]">Crie servidores, categorias e defina permissões completas.</p>
+                  <div className="text-xs font-bold text-white">Cargos e Permissões</div>
+                  <div className="text-[11px] text-[#949ba4]">Crie servidores personalizados com controle total.</div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="rounded bg-[#1e1f22] p-3 text-center border border-[#3f4147]/50">
-            <div className="text-xs font-semibold text-white">Contas de Demonstração</div>
-            <div className="text-[11px] text-[#949ba4] mt-1">
-              dev@johncord.gg / 123456<br />
-              ana@johncord.gg / 123456
-            </div>
+          <div className="rounded bg-[#1e1f22] p-3 text-center text-[11px] text-[#949ba4] border border-white/5">
+            Johncord — Clone Discord em Tempo Real
           </div>
         </div>
       </div>
