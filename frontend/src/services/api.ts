@@ -1,4 +1,5 @@
-const API_URL = '/api';
+const BASE_BACKEND_URL = (import.meta as any).env?.VITE_API_URL || '';
+const API_URL = BASE_BACKEND_URL ? (BASE_BACKEND_URL.endsWith('/api') ? BASE_BACKEND_URL : `${BASE_BACKEND_URL}/api`) : '/api';
 
 export async function apiRequest<T = any>(
   endpoint: string,

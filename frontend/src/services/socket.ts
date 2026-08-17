@@ -4,7 +4,10 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(window.location.origin, {
+    const rawUrl = (import.meta as any).env?.VITE_API_URL || '';
+    const socketHost = rawUrl ? rawUrl.replace(/\/api\/?$/, '') : window.location.origin;
+
+    socket = io(socketHost, {
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: 10,
