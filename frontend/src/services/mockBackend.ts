@@ -14,7 +14,7 @@ interface LocalDB {
   dm_members: { id: string; dm_conversation_id: string; user_id: string }[];
 }
 
-const DB_KEY = 'johncord_clean_db_v2';
+const DB_KEY = 'johncord_clean_db_v3';
 
 function createInitialDB(): LocalDB {
   const botUser: User = {
@@ -37,13 +37,12 @@ function createInitialDB(): LocalDB {
     email: 'dev@johncord.gg',
     avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=JohnDev',
     banner_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80',
-    bio: 'Criador e desenvolvedor do Johncord!',
+    bio: 'Criador do Johncord!',
     custom_status: 'Codando 🎧',
     presence: 'online',
     created_at: new Date().toISOString()
   };
 
-  // Start with clean server list (0 servers pre-assigned)
   return {
     users: [botUser, devUser],
     servers: [],
@@ -66,7 +65,7 @@ function createInitialDB(): LocalDB {
           id: 'dm_msg_1',
           dm_conversation_id: 'dm_dev_bot',
           user_id: botUser.id,
-          content: '👋 Olá! Crie seu próprio servidor clicando no botão **"+"** à esquerda ou entre em um servidor pelo link de convite!',
+          content: '👋 Olá! Crie seu próprio servidor clicando no botão **"+"** à esquerda ou convide amigos para uma chamada de voz!',
           attachments: [],
           is_pinned: 0,
           created_at: new Date().toISOString(),
@@ -97,7 +96,6 @@ function saveDB(db: LocalDB) {
   } catch (e) {}
 }
 
-// Broadcast channel for multi-tab sync
 let channel: BroadcastChannel | null = null;
 try {
   channel = new BroadcastChannel('johncord_realtime_events');
@@ -132,10 +130,9 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     try { currentUser = JSON.parse(currentUserStr); } catch (e) {}
   }
 
-  // Small delay for natural UX
   await new Promise(r => setTimeout(r, 40));
 
-  // Auth Routes
+  // --- Auth Routes ---
   if (endpoint === '/auth/login' && method === 'POST') {
     const { email } = body;
     let user = db.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
@@ -203,14 +200,13 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { user: currentUser };
   }
 
-  // Get My Servers (Only servers the user has created or joined!)
+  // --- Servers ---
   if (endpoint === '/servers' && method === 'GET') {
     const myServerIds = db.server_members.filter(m => m.user_id === currentUser.id).map(m => m.server_id);
     const myServers = db.servers.filter(s => myServerIds.includes(s.id));
     return { servers: myServers };
   }
 
-  // Create Server
   if (endpoint === '/servers' && method === 'POST') {
     const { name, icon_url } = body;
     const newServerId = 'srv_' + Date.now();
@@ -249,7 +245,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       category_id: newCatTextId,
       name: 'geral',
       type: 'text',
-      topic: 'Canal principal para conversar por texto.',
+      topic: 'Canal de texto principal para conversar com amigos.',
       position: 0,
       created_at: new Date().toISOString()
     };
@@ -291,12 +287,9 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { server };
   }
 
-  // Join Server by Invite Link or Code
   if (endpoint === '/servers/join' && method === 'POST') {
     const { inviteCode } = body;
     let cleanCode = (inviteCode || '').trim();
-    
-    // Extract code if user pasted a full URL
     if (cleanCode.includes('invite=')) {
       cleanCode = cleanCode.split('invite=')[1].split('&')[0];
     } else if (cleanCode.includes('join=')) {
@@ -305,12 +298,9 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       const parts = cleanCode.split('/').filter(Boolean);
       cleanCode = parts[parts.length - 1];
     }
-
     cleanCode = cleanCode.toUpperCase();
 
     let server = db.servers.find(s => s.invite_code.toUpperCase() === cleanCode);
-    
-    // If not existing in DB, create server for this code
     if (!server) {
       const newServerId = 'srv_' + Math.random().toString(36).substring(2, 7);
       server = {
@@ -321,10 +311,8 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
         invite_code: cleanCode,
         created_at: new Date().toISOString()
       };
-      
       const catTextId = 'cat_text_' + Date.now();
       const catVoiceId = 'cat_voice_' + Date.now();
-      
       db.servers.push(server);
       db.categories.push(
         { id: catTextId, server_id: newServerId, name: 'CANAIS DE TEXTO', position: 0, created_at: new Date().toISOString() },
@@ -336,7 +324,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       );
     }
 
-    // Add currentUser as member
     if (!db.server_members.some(m => m.server_id === server!.id && m.user_id === currentUser.id)) {
       db.server_members.push({
         id: 'sm_' + Date.now(),
@@ -351,7 +338,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { server };
   }
 
-  // Get Server Details
   if (endpoint.startsWith('/servers/') && method === 'GET') {
     const serverId = endpoint.replace('/servers/', '');
     const server = db.servers.find(s => s.id === serverId);
@@ -386,7 +372,26 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     };
   }
 
-  // Leave Server
+  if (endpoint.startsWith('/servers/') && method === 'PATCH') {
+    const serverId = endpoint.replace('/servers/', '');
+    const idx = db.servers.findIndex(s => s.id === serverId);
+    if (idx !== -1) {
+      db.servers[idx] = { ...db.servers[idx], ...body };
+      saveDB(db);
+      return { server: db.servers[idx] };
+    }
+  }
+
+  if (endpoint.startsWith('/servers/') && method === 'DELETE') {
+    const serverId = endpoint.replace('/servers/', '');
+    db.servers = db.servers.filter(s => s.id !== serverId);
+    db.categories = db.categories.filter(c => c.server_id !== serverId);
+    db.channels = db.channels.filter(c => c.server_id !== serverId);
+    db.server_members = db.server_members.filter(m => m.server_id !== serverId);
+    saveDB(db);
+    return { success: true };
+  }
+
   if (endpoint.startsWith('/servers/') && endpoint.endsWith('/leave') && method === 'POST') {
     const serverId = endpoint.split('/')[2];
     db.server_members = db.server_members.filter(m => !(m.server_id === serverId && m.user_id === currentUser.id));
@@ -394,7 +399,7 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { success: true };
   }
 
-  // Create Category
+  // --- Categories & Channels ---
   if (endpoint.startsWith('/servers/') && endpoint.endsWith('/categories') && method === 'POST') {
     const serverId = endpoint.split('/')[2];
     const category: Category = {
@@ -409,7 +414,24 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { category };
   }
 
-  // Create Channel
+  if (endpoint.startsWith('/categories/') && method === 'PATCH') {
+    const categoryId = endpoint.replace('/categories/', '');
+    const idx = db.categories.findIndex(c => c.id === categoryId);
+    if (idx !== -1) {
+      db.categories[idx] = { ...db.categories[idx], ...body };
+      saveDB(db);
+      return { category: db.categories[idx] };
+    }
+  }
+
+  if (endpoint.startsWith('/categories/') && method === 'DELETE') {
+    const categoryId = endpoint.replace('/categories/', '');
+    db.categories = db.categories.filter(c => c.id !== categoryId);
+    db.channels = db.channels.filter(c => c.category_id !== categoryId);
+    saveDB(db);
+    return { success: true };
+  }
+
   if (endpoint.startsWith('/servers/') && endpoint.endsWith('/channels') && method === 'POST') {
     const serverId = endpoint.split('/')[2];
     const channel: Channel = {
@@ -427,7 +449,59 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { channel };
   }
 
-  // Channels Messages
+  if (endpoint.startsWith('/channels/') && method === 'PATCH') {
+    const channelId = endpoint.replace('/channels/', '');
+    const idx = db.channels.findIndex(c => c.id === channelId);
+    if (idx !== -1) {
+      db.channels[idx] = { ...db.channels[idx], ...body };
+      saveDB(db);
+      return { channel: db.channels[idx] };
+    }
+  }
+
+  if (endpoint.startsWith('/channels/') && method === 'DELETE') {
+    const channelId = endpoint.replace('/channels/', '');
+    db.channels = db.channels.filter(c => c.id !== channelId);
+    db.messages = db.messages.filter(m => m.channel_id !== channelId);
+    saveDB(db);
+    return { success: true };
+  }
+
+  // --- Roles ---
+  if (endpoint.startsWith('/servers/') && endpoint.endsWith('/roles') && method === 'POST') {
+    const serverId = endpoint.split('/')[2];
+    const role: Role = {
+      id: 'role_' + Date.now(),
+      server_id: serverId,
+      name: body.name || 'Novo Cargo',
+      color: body.color || '#5865f2',
+      position: db.roles.filter(r => r.server_id === serverId).length,
+      permissions: body.permissions || ['SEND_MESSAGES'],
+      created_at: new Date().toISOString()
+    };
+    db.roles.push(role);
+    saveDB(db);
+    return { role };
+  }
+
+  if (endpoint.startsWith('/roles/') && method === 'PATCH') {
+    const roleId = endpoint.replace('/roles/', '');
+    const idx = db.roles.findIndex(r => r.id === roleId);
+    if (idx !== -1) {
+      db.roles[idx] = { ...db.roles[idx], ...body };
+      saveDB(db);
+      return { role: db.roles[idx] };
+    }
+  }
+
+  if (endpoint.startsWith('/roles/') && method === 'DELETE') {
+    const roleId = endpoint.replace('/roles/', '');
+    db.roles = db.roles.filter(r => r.id !== roleId);
+    saveDB(db);
+    return { success: true };
+  }
+
+  // --- Messages & Chat ---
   if (endpoint.includes('/channels/') && endpoint.endsWith('/messages') && method === 'GET') {
     const channelId = endpoint.split('/')[2];
     const msgs = db.messages
@@ -439,7 +513,6 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { messages: msgs };
   }
 
-  // DM Messages
   if (endpoint.includes('/dms/') && endpoint.endsWith('/messages') && method === 'GET') {
     const dmId = endpoint.split('/')[2];
     const msgs = db.messages
@@ -451,7 +524,29 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { messages: msgs };
   }
 
-  // Post message
+  if (endpoint.includes('/threads/') && endpoint.endsWith('/messages') && method === 'GET') {
+    const threadParentId = endpoint.split('/')[2];
+    const parent = db.messages.find(m => m.id === threadParentId);
+    const msgs = db.messages.filter(m => m.thread_parent_id === threadParentId);
+    const thread = db.threads.find(t => t.parent_message_id === threadParentId);
+    return { parentMessage: parent, thread, messages: msgs };
+  }
+
+  if (endpoint.includes('/messages/') && endpoint.endsWith('/threads') && method === 'POST') {
+    const parentMessageId = endpoint.split('/')[2];
+    const thread: Thread = {
+      id: 'thread_' + Date.now(),
+      parent_message_id: parentMessageId,
+      channel_id: '',
+      name: body.name || 'Tópico de Conversa',
+      creator_id: currentUser.id,
+      created_at: new Date().toISOString()
+    };
+    db.threads.push(thread);
+    saveDB(db);
+    return { thread };
+  }
+
   if (endpoint === '/messages' && method === 'POST') {
     const { channel_id, dm_conversation_id, content, attachments = [], reply_to_id, thread_parent_id } = body;
     let reply_to = null;
@@ -493,7 +588,25 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { message };
   }
 
-  // Message Reactions
+  if (endpoint.startsWith('/messages/') && method === 'PATCH') {
+    const msgId = endpoint.replace('/messages/', '');
+    const idx = db.messages.findIndex(m => m.id === msgId);
+    if (idx !== -1) {
+      db.messages[idx] = { ...db.messages[idx], content: body.content };
+      saveDB(db);
+      broadcastLocalEvent('chat:message_updated', { message: db.messages[idx] });
+      return { message: db.messages[idx] };
+    }
+  }
+
+  if (endpoint.startsWith('/messages/') && method === 'DELETE') {
+    const msgId = endpoint.replace('/messages/', '');
+    db.messages = db.messages.filter(m => m.id !== msgId);
+    saveDB(db);
+    broadcastLocalEvent('chat:message_deleted', { messageId: msgId });
+    return { success: true };
+  }
+
   if (endpoint.includes('/messages/') && endpoint.endsWith('/reactions') && method === 'POST') {
     const parts = endpoint.split('/');
     const msgId = parts[2];
@@ -517,12 +630,25 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
         msg.reactions.push({ emoji, count: 1, users: [currentUser.id] });
       }
       saveDB(db);
+      broadcastLocalEvent('chat:reaction_changed', { messageId: msgId, reactions: msg.reactions });
       return { reactions: msg.reactions };
     }
     return { reactions: [] };
   }
 
-  // Friends & DMs
+  if (endpoint.includes('/messages/') && endpoint.endsWith('/pin') && method === 'POST') {
+    const parts = endpoint.split('/');
+    const msgId = parts[2];
+    const msg = db.messages.find(m => m.id === msgId);
+    if (msg) {
+      msg.is_pinned = msg.is_pinned ? 0 : 1;
+      saveDB(db);
+      broadcastLocalEvent('chat:message_updated', { message: msg });
+      return { message: msg };
+    }
+  }
+
+  // --- Friends & DMs ---
   if (endpoint === '/friends' && method === 'GET') {
     const list: FriendItem[] = db.friendships
       .filter(f => f.sender_id === currentUser.id || f.receiver_id === currentUser.id)
@@ -558,6 +684,23 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { message: 'Pedido de amizade enviado!' };
   }
 
+  if (endpoint.startsWith('/friends/') && endpoint.endsWith('/accept') && method === 'POST') {
+    const fId = endpoint.split('/')[2];
+    const idx = db.friendships.findIndex(f => f.id === fId);
+    if (idx !== -1) {
+      db.friendships[idx].status = 'accepted';
+      saveDB(db);
+    }
+    return { success: true };
+  }
+
+  if (endpoint.startsWith('/friends/') && method === 'DELETE') {
+    const fId = endpoint.replace('/friends/', '');
+    db.friendships = db.friendships.filter(f => f.id !== fId);
+    saveDB(db);
+    return { success: true };
+  }
+
   if (endpoint === '/dms' && method === 'GET') {
     const convs = db.dm_conversations.map(c => {
       const memberIds = db.dm_members.filter(m => m.dm_conversation_id === c.id).map(m => m.user_id);
@@ -585,6 +728,5 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { conversation: conv };
   }
 
-  // Fallback
   return { success: true };
 }

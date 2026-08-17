@@ -65,10 +65,8 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ onOpenUserSettin
   };
 
   const handleChannelClick = (channel: Channel) => {
-    if (channel.type === 'text') {
-      selectChannel(channel.id);
-    } else {
-      // Join voice channel
+    selectChannel(channel.id);
+    if (channel.type === 'voice') {
       joinVoiceChannel(channel, currentServer.id);
     }
   };
@@ -297,7 +295,10 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ onOpenUserSettin
       {currentVoiceChannel && (
         <div className="p-2 border-t border-[#1f2023] bg-[#232428]">
           <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-2">
+            <button
+              onClick={() => selectChannel(currentVoiceChannel.id)}
+              className="flex items-center gap-2 text-left cursor-pointer hover:opacity-85 transition"
+            >
               <div className="h-2.5 w-2.5 rounded-full bg-[#23a55a] animate-pulse" />
               <div>
                 <div className="text-xs font-bold text-[#23a55a]">Conectado a Voz</div>
@@ -305,7 +306,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({ onOpenUserSettin
                   {currentVoiceChannel.name}
                 </div>
               </div>
-            </div>
+            </button>
 
             <button
               onClick={leaveVoiceChannel}

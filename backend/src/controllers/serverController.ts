@@ -256,12 +256,17 @@ export const serverController = {
       const { inviteCode } = req.body;
       const userId = req.user!.id;
 
-      if (!inviteCode) {
-        res.status(400).json({ error: 'Código de convite obrigatório.' });
-        return;
+      let cleanCode = (inviteCode || '').trim();
+      if (cleanCode.includes('invite=')) {
+        cleanCode = cleanCode.split('invite=')[1].split('&')[0];
+      } else if (cleanCode.includes('join=')) {
+        cleanCode = cleanCode.split('join=')[1].split('&')[0];
+      } else if (cleanCode.includes('/')) {
+        const parts = cleanCode.split('/').filter(Boolean);
+        cleanCode = parts[parts.length - 1];
       }
 
-      const server = db.servers.findByInvite(inviteCode.trim());
+      const server = db.servers.find(s => s.invite_code.toLowerCase() === cleanCode.toLowerCase());
       if (!server) {
         res.status(404).json({ error: 'Convite inválido ou expirado.' });
         return;
