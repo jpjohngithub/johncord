@@ -1,237 +1,157 @@
-import { User, Server, Channel, Category, Role, ServerMember, Message, DMConversation, FriendItem, Thread } from '../types';
-import { publishGlobalEvent, subscribeGlobalTopic, initGlobalRealtime } from './globalRealtime';
-
-interface LocalDB {
-  users: User[];
-  servers: Server[];
-  categories: Category[];
-  channels: Channel[];
-  roles: Role[];
-  server_members: ServerMember[];
-  messages: Message[];
-  threads: Thread[];
-  friendships: { id: string; sender_id: string; receiver_id: string; status: 'pending' | 'accepted' | 'blocked'; created_at: string }[];
-  dm_conversations: DMConversation[];
-  dm_members: { id: string; dm_conversation_id: string; user_id: string }[];
-}
-
-const DB_KEY = 'johncord_global_db_v4';
-
-function createInitialDB(): LocalDB {
-  const botUser: User = {
-    id: 'user_bot',
-    username: 'JohnBot',
-    tag: '0001',
-    email: 'bot@johncord.gg',
-    avatar_url: 'https://api.dicebear.com/7.x/bottts/svg?seed=JohnBot',
-    banner_url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
-    bio: '🤖 Olá! Eu sou o JohnBot, assistente do Johncord.',
-    custom_status: 'Online no Johncord 🚀',
-    presence: 'online',
-    created_at: new Date().toISOString()
-  };
-
-  return {
-    users: [botUser],
-    servers: [],
-    categories: [],
-    channels: [],
-    roles: [],
-    server_members: [],
-    messages: [],
-    threads: [],
-    friendships: [],
-    dm_conversations: [],
-    dm_members: []
-  };
-}
-
-function getDB(): LocalDB {
-  try {
-    const raw = localStorage.getItem(DB_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  const initial = createInitialDB();
-  saveDB(initial);
-  return initial;
-}
-
-function saveDB(db: LocalDB) {
-  try {
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-  } catch (e) {}
-}
-
-// Local and Global Real-time Bridge
-let localBroadcast: BroadcastChannel | null = null;
-try {
-  localBroadcast = new BroadcastChannel('johncord_realtime_events');
-} catch (e) {}
-
-export function broadcastLocalEvent(event: string, data: any) {
-  if (localBroadcast) {
-    localBroadcast.postMessage({ event, data });
-  }
-}
+import { User, Server, Channel, Category, Role, ServerMember, Message, DMConversation, FriendItem } from '../types';
+import { cloudEngine } from './cloudEngine';
 
 export function subscribeLocalEvents(callback: (event: string, data: any) => void) {
+  cloudEngine.init();
+
   const cleanups: (() => void)[] = [];
 
-  // 1. Same-browser broadcast channel
-  if (localBroadcast) {
-    const handler = (msg: MessageEvent) => {
-      if (msg.data?.event) {
-        callback(msg.data.event, msg.data.data);
-      }
-    };
-    localBroadcast.addEventListener('message', handler);
-    cleanups.push(() => localBroadcast?.removeEventListener('message', handler));
-  }
+  cleanups.push(
+    cloudEngine.on('message_received', ({ roomId, message }) => {
+      callback('chat:message_received', { roomId, message });
+    })
+  );
 
-  // 2. Global Internet Real-time pubsub for multi-device sync
-  initGlobalRealtime();
+  cleanups.push(
+    cloudEngine.on('reaction_updated', (data) => {
+      callback('chat:reaction_changed', data);
+    })
+  );
 
-  // Listen for global server & member events
-  const unsubServers = subscribeGlobalTopic('johncord/global/servers', (payload) => {
-    const db = getDB();
-    if (payload.type === 'server_created' && payload.server) {
-      if (!db.servers.some(s => s.id === payload.server.id)) {
-        db.servers.push(payload.server);
-        if (payload.categories) db.categories.push(...payload.categories);
-        if (payload.channels) db.channels.push(...payload.channels);
-        if (payload.roles) db.roles.push(...payload.roles);
-        if (payload.member) db.server_members.push(payload.member);
-        saveDB(db);
-      }
-    } else if (payload.type === 'member_joined' && payload.member) {
-      if (!db.server_members.some(m => m.id === payload.member.id || (m.server_id === payload.member.server_id && m.user_id === payload.member.user_id))) {
-        db.server_members.push(payload.member);
-        if (payload.user && !db.users.some(u => u.id === payload.user.id)) {
-          db.users.push(payload.user);
-        }
-        saveDB(db);
-        callback('server:member_joined', { member: payload.member });
-      }
-    } else if (payload.type === 'channel_created' && payload.channel) {
-      if (!db.channels.some(c => c.id === payload.channel.id)) {
-        db.channels.push(payload.channel);
-        saveDB(db);
-        callback('server:channel_created', { channel: payload.channel });
-      }
-    }
-  });
-  cleanups.push(unsubServers);
+  cleanups.push(
+    cloudEngine.on('user_typing', (data) => {
+      callback('chat:user_typing', data);
+    })
+  );
 
-  // Listen for global presence events (seeing other people online in real-time!)
-  const unsubPresence = subscribeGlobalTopic('johncord/global/presence', (payload) => {
-    const db = getDB();
-    if (payload.user) {
-      const idx = db.users.findIndex(u => u.id === payload.user.id);
-      if (idx !== -1) {
-        db.users[idx] = { ...db.users[idx], ...payload.user, presence: payload.user.presence || 'online' };
-      } else {
-        db.users.push(payload.user);
-      }
-      saveDB(db);
+  cleanups.push(
+    cloudEngine.on('presence_changed', ({ userId, presence, user }) => {
       callback('user:presence_changed', {
-        userId: payload.user.id,
-        presence: payload.user.presence || 'online',
-        custom_status: payload.user.custom_status
+        userId,
+        presence,
+        custom_status: user?.custom_status
       });
-    }
-  });
-  cleanups.push(unsubPresence);
+    })
+  );
 
-  // Listen for global chat messages
-  const unsubChat = subscribeGlobalTopic('johncord/global/chat', (payload) => {
-    const db = getDB();
-    if (payload.type === 'new_message' && payload.message) {
-      if (!db.messages.some(m => m.id === payload.message.id)) {
-        db.messages.push(payload.message);
-        saveDB(db);
-        callback('chat:message_received', {
-          roomId: payload.roomId,
-          message: payload.message
-        });
-      }
-    } else if (payload.type === 'reaction_changed') {
-      const msg = db.messages.find(m => m.id === payload.messageId);
-      if (msg) {
-        msg.reactions = payload.reactions;
-        saveDB(db);
-        callback('chat:reaction_changed', payload);
-      }
-    } else if (payload.type === 'user_typing') {
-      callback('chat:user_typing', payload);
-    }
-  });
-  cleanups.push(unsubChat);
+  cleanups.push(
+    cloudEngine.on('member_joined', ({ serverId, member, user }) => {
+      callback('server:member_joined', { serverId, member, user });
+    })
+  );
+
+  cleanups.push(
+    cloudEngine.on('channel_created', ({ serverId, channel }) => {
+      callback('server:channel_created', { serverId, channel });
+    })
+  );
+
+  cleanups.push(
+    cloudEngine.on('category_created', ({ serverId, category }) => {
+      callback('server:category_created', { serverId, category });
+    })
+  );
+
+  cleanups.push(
+    cloudEngine.on('server_updated', (server) => {
+      callback('server:updated', { server });
+    })
+  );
 
   return () => {
     cleanups.forEach(fn => fn());
   };
 }
 
-// Mock API request handler with instant global cloud sync
+export function broadcastLocalEvent(event: string, data: any) {
+  if (event === 'chat:message_received') {
+    cloudEngine.publish(`johncord/events/messages/${data.roomId}`, data);
+  } else if (event === 'chat:reaction_changed') {
+    cloudEngine.publish(`johncord/events/reactions/${data.channelId || data.messageId}`, data);
+  } else if (event === 'chat:user_typing') {
+    cloudEngine.publish(`johncord/events/typing/${data.channelId}`, data);
+  }
+}
+
+// Full Cloud API Mock Handler
 export async function handleMockAPI(endpoint: string, options: RequestInit = {}): Promise<any> {
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : {};
-  const db = getDB();
+  const db = cloudEngine.db;
+
+  cloudEngine.init();
 
   const currentUserStr = localStorage.getItem('johncord_user');
-  let currentUser: User = db.users[1] || db.users[0];
+  let currentUser: User | null = null;
   if (currentUserStr) {
     try { currentUser = JSON.parse(currentUserStr); } catch (e) {}
   }
 
-  // --- Auth Routes ---
+  // --- Auth ---
   if (endpoint === '/auth/login' && method === 'POST') {
     const { email } = body;
-    let user = db.users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
+    const cleanEmail = (email || '').trim().toLowerCase();
+    
+    let userId = db.usersByEmail[cleanEmail];
+    let user = userId ? db.users[userId] : Object.values(db.users).find(u => u.email.toLowerCase() === cleanEmail);
+
     if (!user) {
       const name = (email || 'Usuario').split('@')[0];
+      const newUserId = 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
       user = {
-        id: 'usr_' + Date.now(),
+        id: newUserId,
         username: name.charAt(0).toUpperCase() + name.slice(1),
         tag: String(Math.floor(1000 + Math.random() * 9000)),
-        email: email || `user_${Date.now()}@johncord.gg`,
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${name}`,
+        email: cleanEmail || `user_${Date.now()}@johncord.gg`,
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(name)}`,
         presence: 'online',
         created_at: new Date().toISOString()
       };
-      db.users.push(user);
-      saveDB(db);
+      db.users[user.id] = user;
+      db.usersByEmail[user.email.toLowerCase()] = user.id;
+    } else {
+      user.presence = 'online';
     }
 
-    // Broadcast presence to all users worldwide
-    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+    cloudEngine.saveCache();
+    cloudEngine.publish('johncord/sync/state/user', { user });
+    cloudEngine.publish('johncord/events/presence', { user, timestamp: Date.now() });
 
-    return { token: 'mock_jwt_token_' + user.id, user };
+    return { token: 'jwt_' + user.id, user };
   }
 
   if (endpoint === '/auth/register' && method === 'POST') {
     const { username, email } = body;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanUsername = (username || 'Usuario').trim();
+    const newUserId = 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+
     const user: User = {
-      id: 'usr_' + Date.now(),
-      username: username || 'NovoUsuario',
+      id: newUserId,
+      username: cleanUsername,
       tag: String(Math.floor(1000 + Math.random() * 9000)),
-      email: email || `user_${Date.now()}@johncord.gg`,
-      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(username || 'NewUser')}`,
+      email: cleanEmail || `user_${Date.now()}@johncord.gg`,
+      avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`,
       presence: 'online',
       created_at: new Date().toISOString()
     };
-    db.users.push(user);
-    saveDB(db);
 
-    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+    db.users[user.id] = user;
+    db.usersByEmail[user.email.toLowerCase()] = user.id;
 
-    return { token: 'mock_jwt_token_' + user.id, user };
+    cloudEngine.saveCache();
+    cloudEngine.publish('johncord/sync/state/user', { user });
+    cloudEngine.publish('johncord/events/presence', { user, timestamp: Date.now() });
+
+    return { token: 'jwt_' + user.id, user };
   }
 
   if (endpoint === '/auth/guest' && method === 'POST') {
     const guestNum = Math.floor(1000 + Math.random() * 9000);
+    const newUserId = 'usr_guest_' + Date.now();
+
     const user: User = {
-      id: 'usr_guest_' + Date.now(),
+      id: newUserId,
       username: `Convidado#${guestNum}`,
       tag: String(guestNum),
       email: `convidado${guestNum}@johncord.gg`,
@@ -239,38 +159,56 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       presence: 'online',
       created_at: new Date().toISOString()
     };
-    db.users.push(user);
-    saveDB(db);
 
-    publishGlobalEvent('johncord/global/presence', { type: 'user_online', user });
+    db.users[user.id] = user;
+    db.usersByEmail[user.email.toLowerCase()] = user.id;
 
-    return { token: 'mock_jwt_token_' + user.id, user };
+    cloudEngine.saveCache();
+    cloudEngine.publish('johncord/sync/state/user', { user });
+    cloudEngine.publish('johncord/events/presence', { user, timestamp: Date.now() });
+
+    return { token: 'jwt_' + user.id, user };
   }
 
   if (endpoint === '/auth/me' && method === 'GET') {
-    const found = db.users.find(u => u.id === currentUser.id) || currentUser;
-    return { user: found };
+    if (currentUser && db.users[currentUser.id]) {
+      return { user: db.users[currentUser.id] };
+    }
+    return { user: currentUser };
   }
 
   if (endpoint === '/auth/profile' && method === 'PATCH') {
-    const idx = db.users.findIndex(u => u.id === currentUser.id);
-    if (idx !== -1) {
-      db.users[idx] = { ...db.users[idx], ...body };
-      saveDB(db);
-      publishGlobalEvent('johncord/global/presence', { type: 'user_online', user: db.users[idx] });
-      return { user: db.users[idx] };
+    if (currentUser) {
+      db.users[currentUser.id] = { ...db.users[currentUser.id], ...body };
+      cloudEngine.saveCache();
+      cloudEngine.publish('johncord/sync/state/user', { user: db.users[currentUser.id] });
+      cloudEngine.publish('johncord/events/presence', { user: db.users[currentUser.id], timestamp: Date.now() });
+      return { user: db.users[currentUser.id] };
     }
     return { user: currentUser };
   }
 
   // --- Servers ---
   if (endpoint === '/servers' && method === 'GET') {
-    const myServerIds = db.server_members.filter(m => m.user_id === currentUser.id).map(m => m.server_id);
-    const myServers = db.servers.filter(s => myServerIds.includes(s.id));
+    if (!currentUser) return { servers: [] };
+    const myServers: Server[] = [];
+
+    Object.keys(db.serverMembers).forEach((sId) => {
+      const members = db.serverMembers[sId] || [];
+      if (members.some(m => m.user_id === currentUser!.id)) {
+        if (db.servers[sId]) {
+          myServers.push(db.servers[sId]);
+        }
+      }
+    });
+
     return { servers: myServers };
   }
 
+  // Create Server
   if (endpoint === '/servers' && method === 'POST') {
+    if (!currentUser) throw new Error('Não autenticado.');
+
     const { name, icon_url } = body;
     const newServerId = 'srv_' + Date.now();
     const newCatTextId = 'cat_text_' + Date.now();
@@ -342,17 +280,30 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       roles: [adminRole]
     };
 
-    db.servers.push(server);
-    db.categories.push(catText, catVoice);
-    db.channels.push(chGeneralText, chGeneralVoice);
-    db.roles.push(adminRole);
-    db.server_members.push(memberEntry);
+    db.servers[newServerId] = server;
+    db.serversByInvite[inviteCode.toUpperCase()] = newServerId;
+    db.categories[newServerId] = [catText, catVoice];
+    db.channels[newServerId] = [chGeneralText, chGeneralVoice];
+    db.roles[newServerId] = [adminRole];
+    db.serverMembers[newServerId] = [memberEntry];
+    db.channelMessages[chGeneralText.id] = [
+      {
+        id: 'msg_init_' + Date.now(),
+        channel_id: chGeneralText.id,
+        user_id: currentUser.id,
+        content: `🎉 Servidor **${server.name}** criado com sucesso! Convide amigos com o link: \`${inviteCode}\``,
+        attachments: [],
+        is_pinned: 1,
+        created_at: new Date().toISOString(),
+        user: currentUser,
+        reactions: []
+      }
+    ];
 
-    saveDB(db);
+    cloudEngine.saveCache();
 
-    // Broadcast new server globally so anyone with invite code can join instantly!
-    publishGlobalEvent('johncord/global/servers', {
-      type: 'server_created',
+    // Broadcast globally to all connected clients on Earth
+    cloudEngine.publish('johncord/sync/state/server', {
       server,
       categories: [catText, catVoice],
       channels: [chGeneralText, chGeneralVoice],
@@ -363,7 +314,10 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { server };
   }
 
+  // Join Server by Invite Code / URL
   if (endpoint === '/servers/join' && method === 'POST') {
+    if (!currentUser) throw new Error('Não autenticado.');
+
     const { inviteCode } = body;
     let cleanCode = (inviteCode || '').trim();
     if (cleanCode.includes('invite=')) {
@@ -376,7 +330,9 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     }
     cleanCode = cleanCode.toUpperCase();
 
-    let server = db.servers.find(s => s.invite_code.toUpperCase() === cleanCode);
+    let serverId = db.serversByInvite[cleanCode];
+    let server = serverId ? db.servers[serverId] : Object.values(db.servers).find(s => s.invite_code.toUpperCase() === cleanCode);
+
     if (!server) {
       const newServerId = 'srv_' + cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_');
       server = {
@@ -389,33 +345,45 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       };
       const catTextId = 'cat_text_' + Date.now();
       const catVoiceId = 'cat_voice_' + Date.now();
-      db.servers.push(server);
-      db.categories.push(
-        { id: catTextId, server_id: newServerId, name: 'CANAIS DE TEXTO', position: 0, created_at: new Date().toISOString() },
-        { id: catVoiceId, server_id: newServerId, name: 'CANAIS DE VOZ', position: 1, created_at: new Date().toISOString() }
-      );
-      db.channels.push(
-        { id: 'ch_' + Date.now() + '_1', server_id: newServerId, category_id: catTextId, name: 'geral', type: 'text', position: 0, created_at: new Date().toISOString() },
-        { id: 'ch_' + Date.now() + '_2', server_id: newServerId, category_id: catVoiceId, name: 'Sala de Voz 🔊', type: 'voice', position: 1, created_at: new Date().toISOString() }
-      );
+      const catText = { id: catTextId, server_id: newServerId, name: 'CANAIS DE TEXTO', position: 0, created_at: new Date().toISOString() };
+      const catVoice = { id: catVoiceId, server_id: newServerId, name: 'CANAIS DE VOZ', position: 1, created_at: new Date().toISOString() };
+      const ch1 = { id: 'ch_' + Date.now() + '_1', server_id: newServerId, category_id: catTextId, name: 'geral', type: 'text' as const, position: 0, created_at: new Date().toISOString() };
+      const ch2 = { id: 'ch_' + Date.now() + '_2', server_id: newServerId, category_id: catVoiceId, name: 'Sala de Voz 🔊', type: 'voice' as const, position: 1, created_at: new Date().toISOString() };
+
+      db.servers[newServerId] = server;
+      db.serversByInvite[cleanCode] = newServerId;
+      db.categories[newServerId] = [catText, catVoice];
+      db.channels[newServerId] = [ch1, ch2];
+      db.roles[newServerId] = [];
+      db.serverMembers[newServerId] = [];
+
+      cloudEngine.publish('johncord/sync/state/server', {
+        server,
+        categories: [catText, catVoice],
+        channels: [ch1, ch2],
+        roles: [],
+        member: null
+      });
     }
 
-    const memberEntry: ServerMember = {
-      id: 'sm_' + Date.now(),
-      server_id: server.id,
-      user_id: currentUser.id,
-      joined_at: new Date().toISOString(),
-      user: currentUser
-    };
+    if (!db.serverMembers[server.id]) db.serverMembers[server.id] = [];
 
-    if (!db.server_members.some(m => m.server_id === server!.id && m.user_id === currentUser.id)) {
-      db.server_members.push(memberEntry);
-      saveDB(db);
+    let existingMember = db.serverMembers[server.id].find(m => m.user_id === currentUser!.id);
+    if (!existingMember) {
+      existingMember = {
+        id: 'sm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 5),
+        server_id: server.id,
+        user_id: currentUser.id,
+        joined_at: new Date().toISOString(),
+        user: currentUser
+      };
+      db.serverMembers[server.id].push(existingMember);
+      cloudEngine.saveCache();
 
-      // Announce member joined to all other users in this server
-      publishGlobalEvent('johncord/global/servers', {
-        type: 'member_joined',
-        member: memberEntry,
+      // Announce member joined to all other clients globally
+      cloudEngine.publish('johncord/sync/state/member', {
+        serverId: server.id,
+        member: existingMember,
         user: currentUser
       });
     }
@@ -423,27 +391,45 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { server };
   }
 
+  // Get Server Details
   if (endpoint.startsWith('/servers/') && method === 'GET') {
     const serverId = endpoint.replace('/servers/', '');
-    const server = db.servers.find(s => s.id === serverId);
+    const server = db.servers[serverId];
     if (!server) throw new Error('Servidor não encontrado.');
 
-    const categories = db.categories.filter(c => c.server_id === serverId);
-    const channels = db.channels.filter(c => c.server_id === serverId);
-    const roles = db.roles.filter(r => r.server_id === serverId);
-    const members = db.server_members
-      .filter(m => m.server_id === serverId)
-      .map(m => ({
-        ...m,
-        user: db.users.find(u => u.id === m.user_id) || m.user
-      }));
+    const categories = db.categories[serverId] || [];
+    const channels = db.channels[serverId] || [];
+    const roles = db.roles[serverId] || [];
+    const rawMembers = db.serverMembers[serverId] || [];
 
-    const categoriesWithChannels = categories.map(cat => ({
+    const members = rawMembers.map((m) => {
+      const u: User = db.users[m.user_id] || m.user || {
+        id: m.user_id,
+        username: m.nickname || 'Usuário',
+        tag: '0000',
+        email: '',
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${m.user_id}`,
+        custom_status: '',
+        presence: 'online',
+        created_at: new Date().toISOString()
+      };
+      const onlineInfo = db.onlineUsers[m.user_id];
+      return {
+        ...m,
+        user: {
+          ...u,
+          presence: onlineInfo ? (onlineInfo.presence as any) : (u.presence || 'online'),
+          custom_status: onlineInfo?.custom_status ?? u.custom_status
+        }
+      };
+    });
+
+    const categoriesWithChannels = categories.map((cat) => ({
       ...cat,
-      channels: channels.filter(ch => ch.category_id === cat.id)
+      channels: channels.filter((ch) => ch.category_id === cat.id)
     }));
 
-    const unassigned = channels.filter(ch => !ch.category_id);
+    const unassigned = channels.filter((ch) => !ch.category_id);
 
     return {
       server: {
@@ -457,24 +443,25 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     };
   }
 
-  // --- Channels Messages ---
+  // Get Messages
   if (endpoint.includes('/channels/') && endpoint.endsWith('/messages') && method === 'GET') {
     const channelId = endpoint.split('/')[2];
-    const msgs = db.messages
-      .filter(m => m.channel_id === channelId)
-      .map(m => ({
-        ...m,
-        user: db.users.find(u => u.id === m.user_id) || m.user
-      }));
-    return { messages: msgs };
+    const rawMsgs = db.channelMessages[channelId] || [];
+    const messages = rawMsgs.map((m) => ({
+      ...m,
+      user: db.users[m.user_id] || m.user
+    }));
+    return { messages };
   }
 
-  // --- Post Message with Global Real-time Dispatch ---
+  // Send Message
   if (endpoint === '/messages' && method === 'POST') {
+    if (!currentUser) throw new Error('Não autenticado.');
+
     const { channel_id, dm_conversation_id, content, attachments = [], reply_to_id, thread_parent_id } = body;
     let reply_to = null;
-    if (reply_to_id) {
-      const parent = db.messages.find(m => m.id === reply_to_id);
+    if (reply_to_id && channel_id && db.channelMessages[channel_id]) {
+      const parent = db.channelMessages[channel_id].find(m => m.id === reply_to_id);
       if (parent) {
         reply_to = {
           id: parent.id,
@@ -500,17 +487,21 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       reactions: []
     };
 
-    db.messages.push(message);
-    saveDB(db);
-
     const roomId = channel_id || dm_conversation_id || `thread:${thread_parent_id}`;
 
-    // Publish to local browser
-    broadcastLocalEvent('chat:message_received', { roomId, message });
+    if (channel_id) {
+      if (!db.channelMessages[channel_id]) db.channelMessages[channel_id] = [];
+      db.channelMessages[channel_id].push(message);
+    }
+    if (dm_conversation_id) {
+      if (!db.dmMessages[dm_conversation_id]) db.dmMessages[dm_conversation_id] = [];
+      db.dmMessages[dm_conversation_id].push(message);
+    }
 
-    // Publish to global internet network so everyone receives it in <10ms!
-    publishGlobalEvent('johncord/global/chat', {
-      type: 'new_message',
+    cloudEngine.saveCache();
+
+    // Instant real-time publish
+    cloudEngine.publish(`johncord/events/messages/${roomId}`, {
       roomId,
       message
     });
@@ -518,62 +509,90 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
     return { message };
   }
 
-  // --- Message Reactions ---
+  // Toggle Reactions
   if (endpoint.includes('/messages/') && endpoint.endsWith('/reactions') && method === 'POST') {
+    if (!currentUser) throw new Error('Não autenticado.');
+
     const parts = endpoint.split('/');
     const msgId = parts[2];
-    const { emoji } = body;
-    const msg = db.messages.find(m => m.id === msgId);
-    if (msg) {
-      if (!msg.reactions) msg.reactions = [];
-      const existing = msg.reactions.find(r => r.emoji === emoji);
+    const { emoji, channelId } = body;
+
+    let targetMsg: Message | undefined;
+    if (channelId && db.channelMessages[channelId]) {
+      targetMsg = db.channelMessages[channelId].find(m => m.id === msgId);
+    }
+    if (!targetMsg) {
+      Object.values(db.channelMessages).forEach(list => {
+        const found = list.find(m => m.id === msgId);
+        if (found) targetMsg = found;
+      });
+    }
+
+    if (targetMsg) {
+      if (!targetMsg.reactions) targetMsg.reactions = [];
+      const existing = targetMsg.reactions.find(r => r.emoji === emoji);
       if (existing) {
         if (existing.users.includes(currentUser.id)) {
-          existing.users = existing.users.filter(uid => uid !== currentUser.id);
+          existing.users = existing.users.filter(uid => uid !== currentUser!.id);
           existing.count -= 1;
           if (existing.count <= 0) {
-            msg.reactions = msg.reactions.filter(r => r.emoji !== emoji);
+            targetMsg.reactions = targetMsg.reactions.filter(r => r.emoji !== emoji);
           }
         } else {
           existing.users.push(currentUser.id);
           existing.count += 1;
         }
       } else {
-        msg.reactions.push({ emoji, count: 1, users: [currentUser.id] });
+        targetMsg.reactions.push({ emoji, count: 1, users: [currentUser.id] });
       }
-      saveDB(db);
 
-      const reactionPayload = { messageId: msgId, reactions: msg.reactions };
-      broadcastLocalEvent('chat:reaction_changed', reactionPayload);
-      publishGlobalEvent('johncord/global/chat', { type: 'reaction_changed', ...reactionPayload });
+      cloudEngine.saveCache();
 
-      return { reactions: msg.reactions };
+      const payload = { messageId: msgId, reactions: targetMsg.reactions, channelId: targetMsg.channel_id };
+      cloudEngine.publish(`johncord/events/reactions/${targetMsg.channel_id || msgId}`, payload);
+
+      return { reactions: targetMsg.reactions };
     }
     return { reactions: [] };
   }
 
-  // --- Friends & DMs ---
+  // Friends & DMs
   if (endpoint === '/friends' && method === 'GET') {
-    const list: FriendItem[] = db.friendships
-      .filter(f => f.sender_id === currentUser.id || f.receiver_id === currentUser.id)
+    if (!currentUser) return { friends: [] };
+    const list: FriendItem[] = Object.values(db.friendships)
+      .filter(f => f.sender_id === currentUser!.id || f.receiver_id === currentUser!.id)
       .map(f => {
-        const otherId = f.sender_id === currentUser.id ? f.receiver_id : f.sender_id;
-        const otherUser = db.users.find(u => u.id === otherId);
+        const otherId = f.sender_id === currentUser!.id ? f.receiver_id : f.sender_id;
+        const otherUser: User = db.users[otherId] || {
+          id: otherId,
+          username: 'Amigo',
+          tag: '0000',
+          email: '',
+          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${otherId}`,
+          custom_status: '',
+          presence: 'online',
+          created_at: f.created_at
+        };
+        const onlineInfo = db.onlineUsers[otherId];
         return {
           id: f.id,
           status: f.status,
-          isSender: f.sender_id === currentUser.id,
+          isSender: f.sender_id === currentUser!.id,
           createdAt: f.created_at,
-          friend: otherUser
+          friend: {
+            ...otherUser,
+            presence: onlineInfo ? (onlineInfo.presence as any) : (otherUser.presence || 'online')
+          }
         };
       });
     return { friends: list };
   }
 
   if (endpoint === '/friends/request' && method === 'POST') {
+    if (!currentUser) throw new Error('Não autenticado.');
     const { userTag } = body;
     const [name, tag] = (userTag || '').split('#');
-    const target = db.users.find(u => u.username.toLowerCase() === (name || '').toLowerCase() && (!tag || u.tag === tag));
+    const target = Object.values(db.users).find(u => u.username.toLowerCase() === (name || '').toLowerCase() && (!tag || u.tag === tag));
     if (!target) throw new Error('Usuário não encontrado.');
 
     const newFriendship = {
@@ -583,36 +602,13 @@ export async function handleMockAPI(endpoint: string, options: RequestInit = {})
       status: 'pending' as const,
       created_at: new Date().toISOString()
     };
-    db.friendships.push(newFriendship);
-    saveDB(db);
+    db.friendships[newFriendship.id] = newFriendship;
+    cloudEngine.saveCache();
     return { message: 'Pedido de amizade enviado!' };
   }
 
   if (endpoint === '/dms' && method === 'GET') {
-    const convs = db.dm_conversations.map(c => {
-      const memberIds = db.dm_members.filter(m => m.dm_conversation_id === c.id).map(m => m.user_id);
-      const members = db.users.filter(u => memberIds.includes(u.id));
-      return { ...c, members };
-    });
-    return { conversations: convs };
-  }
-
-  if (endpoint === '/dms' && method === 'POST') {
-    const { targetUserId } = body;
-    let conv = db.dm_conversations.find(c => !c.is_group && db.dm_members.some(m => m.dm_conversation_id === c.id && m.user_id === targetUserId));
-    if (!conv) {
-      conv = {
-        id: 'dm_' + Date.now(),
-        is_group: 0,
-        created_at: new Date().toISOString(),
-        members: [currentUser, db.users.find(u => u.id === targetUserId) || currentUser]
-      };
-      db.dm_conversations.push(conv);
-      db.dm_members.push({ id: 'dmm_' + Date.now() + '1', dm_conversation_id: conv.id, user_id: currentUser.id });
-      db.dm_members.push({ id: 'dmm_' + Date.now() + '2', dm_conversation_id: conv.id, user_id: targetUserId });
-      saveDB(db);
-    }
-    return { conversation: conv };
+    return { conversations: Object.values(db.dmConversations) };
   }
 
   return { success: true };
