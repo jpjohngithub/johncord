@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  username      String
+  tag           String
+  email         String   @unique
+  password_hash String?
+  avatar_url    String   @default("")
+  banner_url    String   @default("")
+  bio           String   @default("")
+  custom_status String   @default("")
+  presence      String   @default("online")
+  created_at    DateTime @default(now())
+
+  @@map("users")
+}
+
+model Server {
+  id          String   @id @default(uuid())
+  name        String
+  icon_url    String?
+  banner_url  String?
+  owner_id    String
+  invite_code String   @unique
+  created_at  DateTime @default(now())
+
+  @@map("servers")
+}
+
+model ServerMember {
+  id        String   @id @default(uuid())
+  server_id String
+  user_id   String
+  nickname  String?
+  joined_at DateTime @default(now())
+
+  @@unique([server_id, user_id])
+  @@map("server_members")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  server_id   String
+  name        String
+  color       String   @default("#99aab5")
+  position    Int      @default(0)
+  permissions String   @default("[]")
+  created_at  DateTime @default(now())
+
+  @@map("roles")
+}
+
+model MemberRole {
+  id        String @id @default(uuid())
+  server_id String
+  user_id   String
+  role_id   String
+
+  @@unique([server_id, user_id, role_id])
+  @@map("member_roles")
+}
+
+model Category {
+  id         String   @id @default(uuid())
+  server_id  String
+  name       String
+  position   Int      @default(0)
+  created_at DateTime @default(now())
+
+  @@map("categories")
+}
+
+model Channel {
+  id          String   @id @default(uuid())
+  server_id   String
+  category_id String?
+  name        String
+  type        String   @default("text")
+  topic       String?
+  position    Int      @default(0)
+  created_at  DateTime @default(now())
+
+  @@map("channels")
+}
+
+model Message {
+  id                 String    @id @default(uuid())
+  channel_id         String?
+  dm_conversation_id String?
+  thread_parent_id   String?
+  user_id            String
+  content            String
+  attachments        String    @default("[]")
+  reply_to_id        String?
+  is_pinned          Int       @default(0)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime?
+
+  @@map("messages")
+}
+
+model MessageReaction {
+  id         String   @id @default(uuid())
+  message_id String
+  user_id    String
+  emoji      String
+  created_at DateTime @default(now())
+
+  @@map("message_reactions")
+}
+
+model Thread {
+  id                String   @id @default(uuid())
+  parent_message_id String   @unique
+  channel_id        String
+  name              String
+  creator_id        String
+  created_at        DateTime @default(now())
+
+  @@map("threads")
+}
+
+model Friendship {
+  id         String   @id @default(uuid())
+  sender_id  String
+  receiver_id String
+  status     String   @default("pending")
+  created_at DateTime @default(now())
+
+  @@map("friendships")
+}
+
+model DMConversation {
+  id         String   @id @default(uuid())
+  is_group   Int      @default(0)
+  name       String?
+  icon_url   String?
+  created_at DateTime @default(now())
+
+  @@map("dm_conversations")
+}
+
+model DMMember {
+  id                 String @id @default(uuid())
+  dm_conversation_id String
+  user_id            String
+
+  @@unique([dm_conversation_id, user_id])
+  @@map("dm_members")
+}

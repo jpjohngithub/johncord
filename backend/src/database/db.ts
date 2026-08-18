@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
+import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 import {
   User,
   Server,
@@ -75,6 +78,135 @@ let data: Schema = {
   dm_members: []
 };
 
+let prismaClient: PrismaClient | null = null;
+let isPrismaConnected = false;
+
+export function getPrismaClient(): PrismaClient | null {
+  if (prismaClient) return prismaClient;
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) return null;
+
+  try {
+    const pool = new Pool({ connectionString: dbUrl, ssl: dbUrl.includes('localhost') ? false : { rejectUnauthorized: false } });
+    const adapter = new PrismaPg(pool);
+    prismaClient = new PrismaClient({ adapter });
+    return prismaClient;
+  } catch (e) {
+    console.error('⚠️ Could not initialize Prisma adapter:', e);
+    return null;
+  }
+}
+
+// Background sync helpers
+async function syncPrismaUser(user: User, action: 'insert' | 'update' = 'insert') {
+  if (!prismaClient || !isPrismaConnected) return;
+  try {
+    if (action === 'insert') {
+      await prismaClient.user.upsert({
+        where: { email: user.email },
+        update: {
+          username: user.username,
+          tag: user.tag,
+          avatar_url: user.avatar_url || '',
+          banner_url: user.banner_url || '',
+          bio: user.bio || '',
+          custom_status: user.custom_status || '',
+          presence: user.presence || 'online'
+        },
+        create: {
+          id: user.id,
+          username: user.username,
+          tag: user.tag,
+          email: user.email,
+          avatar_url: user.avatar_url || '',
+          banner_url: user.banner_url || '',
+          bio: user.bio || '',
+          custom_status: user.custom_status || '',
+          presence: user.presence || 'online'
+        }
+      });
+    } else {
+      await prismaClient.user.update({
+        where: { id: user.id },
+        data: {
+          username: user.username,
+          tag: user.tag,
+          avatar_url: user.avatar_url,
+          banner_url: user.banner_url,
+          bio: user.bio,
+          custom_status: user.custom_status,
+          presence: user.presence
+        }
+      });
+    }
+  } catch (e) {
+    console.error('Error syncing user with cloud database:', e);
+  }
+}
+
+async function syncPrismaServer(server: Server, action: 'insert' | 'update' | 'delete' = 'insert') {
+  if (!prismaClient || !isPrismaConnected) return;
+  try {
+    if (action === 'insert') {
+      await prismaClient.server.upsert({
+        where: { invite_code: server.invite_code },
+        update: { name: server.name, icon_url: server.icon_url, banner_url: server.banner_url, owner_id: server.owner_id },
+        create: {
+          id: server.id,
+          name: server.name,
+          icon_url: server.icon_url,
+          banner_url: server.banner_url,
+          owner_id: server.owner_id,
+          invite_code: server.invite_code
+        }
+      });
+    } else if (action === 'update') {
+      await prismaClient.server.update({
+        where: { id: server.id },
+        data: { name: server.name, icon_url: server.icon_url, banner_url: server.banner_url, owner_id: server.owner_id }
+      });
+    } else if (action === 'delete') {
+      await prismaClient.server.delete({ where: { id: server.id } });
+    }
+  } catch (e) {
+    console.error('Error syncing server with cloud database:', e);
+  }
+}
+
+async function syncPrismaMessage(msg: Message, action: 'insert' | 'update' | 'delete' = 'insert') {
+  if (!prismaClient || !isPrismaConnected) return;
+  try {
+    if (action === 'insert') {
+      await prismaClient.message.create({
+        data: {
+          id: msg.id,
+          channel_id: msg.channel_id,
+          dm_conversation_id: msg.dm_conversation_id,
+          thread_parent_id: msg.thread_parent_id,
+          user_id: msg.user_id,
+          content: msg.content,
+          attachments: JSON.stringify(msg.attachments || []),
+          reply_to_id: msg.reply_to_id,
+          is_pinned: msg.is_pinned || 0
+        }
+      });
+    } else if (action === 'update') {
+      await prismaClient.message.update({
+        where: { id: msg.id },
+        data: {
+          content: msg.content,
+          is_pinned: msg.is_pinned,
+          updated_at: msg.updated_at ? new Date(msg.updated_at) : new Date()
+        }
+      });
+    } else if (action === 'delete') {
+      await prismaClient.message.delete({ where: { id: msg.id } });
+    }
+  } catch (e) {
+    console.error('Error syncing message with cloud database:', e);
+  }
+}
+
 let saveTimeout: NodeJS.Timeout | null = null;
 
 export function saveDatabase() {
@@ -85,23 +217,249 @@ export function saveDatabase() {
       fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
       fs.renameSync(tempPath, dbFilePath);
     } catch (err) {
-      console.error('Error saving database:', err);
+      console.error('Error saving local database cache:', err);
     }
   }, 100);
 }
 
-export function initDatabase() {
+export async function initDatabase() {
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    console.log('🌐 Connecting to Cloud PostgreSQL database via Prisma...');
+    const prisma = getPrismaClient();
+    if (prisma) {
+      try {
+        await prisma.$connect();
+        isPrismaConnected = true;
+        console.log('✅ Connected to Cloud PostgreSQL database!');
+
+        // Try to load existing data from Cloud PostgreSQL
+        const cloudUsers = await prisma.user.findMany();
+        const cloudServers = await prisma.server.findMany();
+
+        if (cloudUsers.length > 0) {
+          console.log(`📦 Loaded ${cloudUsers.length} users and ${cloudServers.length} servers from Cloud PostgreSQL.`);
+          // Populate memory data from cloud
+          const cloudChannels = await prisma.channel.findMany();
+          const cloudCategories = await prisma.category.findMany();
+          const cloudRoles = await prisma.role.findMany();
+          const cloudMembers = await prisma.serverMember.findMany();
+          const cloudMemberRoles = await prisma.memberRole.findMany();
+          const cloudMessages = await prisma.message.findMany({ take: 2000, orderBy: { created_at: 'asc' } });
+          const cloudReactions = await prisma.messageReaction.findMany();
+          const cloudThreads = await prisma.thread.findMany();
+          const cloudFriendships = await prisma.friendship.findMany();
+          const cloudDms = await prisma.dMConversation.findMany();
+          const cloudDmMembers = await prisma.dMMember.findMany();
+
+          data = {
+            users: cloudUsers.map(u => ({
+              id: u.id,
+              username: u.username,
+              tag: u.tag,
+              email: u.email,
+              avatar_url: u.avatar_url,
+              banner_url: u.banner_url,
+              bio: u.bio,
+              custom_status: u.custom_status,
+              presence: u.presence as any,
+              created_at: u.created_at.toISOString()
+            })),
+            servers: cloudServers.map(s => ({
+              id: s.id,
+              name: s.name,
+              icon_url: s.icon_url || undefined,
+              banner_url: s.banner_url || undefined,
+              owner_id: s.owner_id,
+              invite_code: s.invite_code,
+              created_at: s.created_at.toISOString()
+            })),
+            server_members: cloudMembers.map(m => ({
+              id: m.id,
+              server_id: m.server_id,
+              user_id: m.user_id,
+              nickname: m.nickname || undefined,
+              joined_at: m.joined_at.toISOString()
+            })),
+            roles: cloudRoles.map(r => ({
+              id: r.id,
+              server_id: r.server_id,
+              name: r.name,
+              color: r.color,
+              position: r.position,
+              permissions: (() => { try { return JSON.parse(r.permissions); } catch { return []; } })(),
+              created_at: r.created_at.toISOString()
+            })),
+            member_roles: cloudMemberRoles.map(mr => ({
+              id: mr.id,
+              server_id: mr.server_id,
+              user_id: mr.user_id,
+              role_id: mr.role_id
+            })),
+            categories: cloudCategories.map(c => ({
+              id: c.id,
+              server_id: c.server_id,
+              name: c.name,
+              position: c.position,
+              created_at: c.created_at.toISOString()
+            })),
+            channels: cloudChannels.map(c => ({
+              id: c.id,
+              server_id: c.server_id,
+              category_id: c.category_id,
+              name: c.name,
+              type: c.type as any,
+              topic: c.topic || undefined,
+              position: c.position,
+              created_at: c.created_at.toISOString()
+            })),
+            messages: cloudMessages.map(m => ({
+              id: m.id,
+              channel_id: m.channel_id,
+              dm_conversation_id: m.dm_conversation_id,
+              thread_parent_id: m.thread_parent_id,
+              user_id: m.user_id,
+              content: m.content,
+              attachments: (() => { try { return JSON.parse(m.attachments); } catch { return []; } })(),
+              reply_to_id: m.reply_to_id,
+              is_pinned: m.is_pinned,
+              created_at: m.created_at.toISOString(),
+              updated_at: m.updated_at ? m.updated_at.toISOString() : undefined
+            })),
+            message_reactions: cloudReactions.map(r => ({
+              id: r.id,
+              message_id: r.message_id,
+              user_id: r.user_id,
+              emoji: r.emoji,
+              created_at: r.created_at.toISOString()
+            })),
+            threads: cloudThreads.map(t => ({
+              id: t.id,
+              parent_message_id: t.parent_message_id,
+              channel_id: t.channel_id,
+              name: t.name,
+              creator_id: t.creator_id,
+              created_at: t.created_at.toISOString()
+            })),
+            friendships: cloudFriendships.map(f => ({
+              id: f.id,
+              sender_id: f.sender_id,
+              receiver_id: f.receiver_id,
+              status: f.status as any,
+              created_at: f.created_at.toISOString()
+            })),
+            dm_conversations: cloudDms.map(d => ({
+              id: d.id,
+              is_group: d.is_group,
+              name: d.name || undefined,
+              icon_url: d.icon_url || undefined,
+              created_at: d.created_at.toISOString()
+            })),
+            dm_members: cloudDmMembers.map(dm => ({
+              id: dm.id,
+              dm_conversation_id: dm.dm_conversation_id,
+              user_id: dm.user_id
+            }))
+          };
+          saveDatabase();
+          return;
+        } else {
+          console.log('🌱 Cloud database is empty. Seeding initial data to Cloud PostgreSQL...');
+          seedInitialData();
+          await pushAllToCloud(prisma);
+          return;
+        }
+      } catch (err) {
+        console.error('⚠️ Could not connect to Cloud PostgreSQL, falling back to local storage cache:', err);
+      }
+    }
+  }
+
+  // Local fallback
   if (fs.existsSync(dbFilePath)) {
     try {
       const raw = fs.readFileSync(dbFilePath, 'utf-8');
       data = JSON.parse(raw);
-      console.log(`📦 Loaded existing Johncord database with ${data.users.length} users and ${data.servers.length} servers.`);
+      console.log(`📦 Loaded local Johncord database with ${data.users.length} users and ${data.servers.length} servers.`);
     } catch (e) {
-      console.error('Failed to parse database file, re-initializing...', e);
+      console.error('Failed to parse local database file, re-initializing...', e);
       seedInitialData();
     }
   } else {
     seedInitialData();
+  }
+}
+
+async function pushAllToCloud(prisma: PrismaClient) {
+  try {
+    for (const u of data.users) {
+      await prisma.user.upsert({
+        where: { email: u.email },
+        update: {},
+        create: {
+          id: u.id,
+          username: u.username,
+          tag: u.tag,
+          email: u.email,
+          avatar_url: u.avatar_url || '',
+          banner_url: u.banner_url || '',
+          bio: u.bio || '',
+          custom_status: u.custom_status || '',
+          presence: u.presence || 'online'
+        }
+      });
+    }
+
+    for (const s of data.servers) {
+      await prisma.server.upsert({
+        where: { invite_code: s.invite_code },
+        update: {},
+        create: {
+          id: s.id,
+          name: s.name,
+          icon_url: s.icon_url,
+          banner_url: s.banner_url,
+          owner_id: s.owner_id,
+          invite_code: s.invite_code
+        }
+      });
+    }
+
+    for (const cat of data.categories) {
+      await prisma.category.upsert({
+        where: { id: cat.id },
+        update: {},
+        create: { id: cat.id, server_id: cat.server_id, name: cat.name, position: cat.position }
+      });
+    }
+
+    for (const ch of data.channels) {
+      await prisma.channel.upsert({
+        where: { id: ch.id },
+        update: {},
+        create: { id: ch.id, server_id: ch.server_id, category_id: ch.category_id, name: ch.name, type: ch.type, topic: ch.topic, position: ch.position }
+      });
+    }
+
+    for (const m of data.server_members) {
+      await prisma.serverMember.upsert({
+        where: { server_id_user_id: { server_id: m.server_id, user_id: m.user_id } },
+        update: {},
+        create: { id: m.id, server_id: m.server_id, user_id: m.user_id, nickname: m.nickname }
+      });
+    }
+
+    for (const r of data.roles) {
+      await prisma.role.upsert({
+        where: { id: r.id },
+        update: {},
+        create: { id: r.id, server_id: r.server_id, name: r.name, color: r.color, position: r.position, permissions: JSON.stringify(r.permissions) }
+      });
+    }
+
+    console.log('🚀 Successfully pushed initial schema & data to Cloud PostgreSQL!');
+  } catch (err) {
+    console.error('Error pushing data to cloud:', err);
   }
 }
 
@@ -122,6 +480,7 @@ export const db = {
     insert: (user: User) => {
       data.users.push(user);
       saveDatabase();
+      syncPrismaUser(user, 'insert');
       return user;
     },
     update: (id: string, updates: Partial<User>) => {
@@ -129,6 +488,7 @@ export const db = {
       if (idx !== -1) {
         data.users[idx] = { ...data.users[idx], ...updates };
         saveDatabase();
+        syncPrismaUser(data.users[idx], 'update');
         return data.users[idx];
       }
       return null;
@@ -144,6 +504,7 @@ export const db = {
     insert: (server: Server) => {
       data.servers.push(server);
       saveDatabase();
+      syncPrismaServer(server, 'insert');
       return server;
     },
     update: (id: string, updates: Partial<Server>) => {
@@ -151,18 +512,21 @@ export const db = {
       if (idx !== -1) {
         data.servers[idx] = { ...data.servers[idx], ...updates };
         saveDatabase();
+        syncPrismaServer(data.servers[idx], 'update');
         return data.servers[idx];
       }
       return null;
     },
     delete: (id: string) => {
-      data.servers = data.servers.filter(s => s.id !== id);
+      const s = data.servers.find(srv => srv.id === id);
+      data.servers = data.servers.filter(srv => srv.id !== id);
       data.server_members = data.server_members.filter(m => m.server_id !== id);
       data.channels = data.channels.filter(c => c.server_id !== id);
       data.categories = data.categories.filter(c => c.server_id !== id);
       data.roles = data.roles.filter(r => r.server_id !== id);
       data.member_roles = data.member_roles.filter(mr => mr.server_id !== id);
       saveDatabase();
+      if (s) syncPrismaServer(s, 'delete');
     }
   },
 
@@ -177,6 +541,13 @@ export const db = {
     insert: (member: ServerMember) => {
       data.server_members.push(member);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.serverMember.upsert({
+          where: { server_id_user_id: { server_id: member.server_id, user_id: member.user_id } },
+          update: { nickname: member.nickname },
+          create: { id: member.id, server_id: member.server_id, user_id: member.user_id, nickname: member.nickname }
+        }).catch(console.error);
+      }
       return member;
     },
     update: (id: string, updates: Partial<ServerMember>) => {
@@ -192,6 +563,9 @@ export const db = {
       data.server_members = data.server_members.filter(m => !(m.server_id === server_id && m.user_id === user_id));
       data.member_roles = data.member_roles.filter(mr => !(mr.server_id === server_id && mr.user_id === user_id));
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.serverMember.deleteMany({ where: { server_id, user_id } }).catch(console.error);
+      }
     }
   },
 
@@ -203,6 +577,11 @@ export const db = {
     insert: (role: Role) => {
       data.roles.push(role);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.role.create({
+          data: { id: role.id, server_id: role.server_id, name: role.name, color: role.color, position: role.position, permissions: JSON.stringify(role.permissions) }
+        }).catch(console.error);
+      }
       return role;
     },
     update: (id: string, updates: Partial<Role>) => {
@@ -218,6 +597,9 @@ export const db = {
       data.roles = data.roles.filter(r => r.id !== id);
       data.member_roles = data.member_roles.filter(mr => mr.role_id !== id);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.role.delete({ where: { id } }).catch(console.error);
+      }
     },
     getUserRoles: (server_id: string, user_id: string) => {
       const roleIds = data.member_roles
@@ -230,11 +612,17 @@ export const db = {
       if (!exists) {
         data.member_roles.push({ id: uuidv4(), server_id, user_id, role_id });
         saveDatabase();
+        if (prismaClient && isPrismaConnected) {
+          prismaClient.memberRole.create({ data: { id: uuidv4(), server_id, user_id, role_id } }).catch(console.error);
+        }
       }
     },
     removeRole: (server_id: string, user_id: string, role_id: string) => {
       data.member_roles = data.member_roles.filter(mr => !(mr.server_id === server_id && mr.user_id === user_id && mr.role_id === role_id));
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.memberRole.deleteMany({ where: { server_id, user_id, role_id } }).catch(console.error);
+      }
     }
   },
 
@@ -246,6 +634,9 @@ export const db = {
     insert: (cat: Category) => {
       data.categories.push(cat);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.category.create({ data: { id: cat.id, server_id: cat.server_id, name: cat.name, position: cat.position } }).catch(console.error);
+      }
       return cat;
     },
     update: (id: string, updates: Partial<Category>) => {
@@ -263,6 +654,9 @@ export const db = {
         if (ch.category_id === id) ch.category_id = null;
       });
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.category.delete({ where: { id } }).catch(console.error);
+      }
     }
   },
 
@@ -273,6 +667,11 @@ export const db = {
     insert: (channel: Channel) => {
       data.channels.push(channel);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.channel.create({
+          data: { id: channel.id, server_id: channel.server_id, category_id: channel.category_id, name: channel.name, type: channel.type, topic: channel.topic, position: channel.position }
+        }).catch(console.error);
+      }
       return channel;
     },
     update: (id: string, updates: Partial<Channel>) => {
@@ -288,6 +687,9 @@ export const db = {
       data.channels = data.channels.filter(c => c.id !== id);
       data.messages = data.messages.filter(m => m.channel_id !== id);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.channel.delete({ where: { id } }).catch(console.error);
+      }
     }
   },
 
@@ -303,6 +705,7 @@ export const db = {
     insert: (msg: Message) => {
       data.messages.push(msg);
       saveDatabase();
+      syncPrismaMessage(msg, 'insert');
       return msg;
     },
     update: (id: string, updates: Partial<Message>) => {
@@ -310,15 +713,18 @@ export const db = {
       if (idx !== -1) {
         data.messages[idx] = { ...data.messages[idx], ...updates };
         saveDatabase();
+        syncPrismaMessage(data.messages[idx], 'update');
         return data.messages[idx];
       }
       return null;
     },
     delete: (id: string) => {
-      data.messages = data.messages.filter(m => m.id !== id && m.thread_parent_id !== id);
+      const m = data.messages.find(msg => msg.id === id);
+      data.messages = data.messages.filter(msg => msg.id !== id && msg.thread_parent_id !== id);
       data.message_reactions = data.message_reactions.filter(r => r.message_id !== id);
       data.threads = data.threads.filter(t => t.parent_message_id !== id);
       saveDatabase();
+      if (m) syncPrismaMessage(m, 'delete');
     },
     getReactions: (message_id: string) => {
       const reactions = data.message_reactions.filter(r => r.message_id === message_id);
@@ -336,19 +742,26 @@ export const db = {
     addReaction: (message_id: string, user_id: string, emoji: string) => {
       const exists = data.message_reactions.find(r => r.message_id === message_id && r.user_id === user_id && r.emoji === emoji);
       if (!exists) {
-        data.message_reactions.push({
+        const nr: DBReaction = {
           id: uuidv4(),
           message_id,
           user_id,
           emoji,
           created_at: new Date().toISOString()
-        });
+        };
+        data.message_reactions.push(nr);
         saveDatabase();
+        if (prismaClient && isPrismaConnected) {
+          prismaClient.messageReaction.create({ data: nr }).catch(console.error);
+        }
       }
     },
     removeReaction: (message_id: string, user_id: string, emoji: string) => {
       data.message_reactions = data.message_reactions.filter(r => !(r.message_id === message_id && r.user_id === user_id && r.emoji === emoji));
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.messageReaction.deleteMany({ where: { message_id, user_id, emoji } }).catch(console.error);
+      }
     }
   },
 
@@ -362,6 +775,9 @@ export const db = {
     insert: (thread: Thread) => {
       data.threads.push(thread);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.thread.create({ data: { id: thread.id, parent_message_id: thread.parent_message_id, channel_id: thread.channel_id, name: thread.name, creator_id: thread.creator_id } }).catch(console.error);
+      }
       return thread;
     }
   },
@@ -375,6 +791,9 @@ export const db = {
     insert: (friendship: Friendship) => {
       data.friendships.push(friendship);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.friendship.create({ data: { id: friendship.id, sender_id: friendship.sender_id, receiver_id: friendship.receiver_id, status: friendship.status } }).catch(console.error);
+      }
       return friendship;
     },
     update: (id: string, status: 'pending' | 'accepted' | 'blocked') => {
@@ -382,6 +801,9 @@ export const db = {
       if (idx !== -1) {
         data.friendships[idx].status = status;
         saveDatabase();
+        if (prismaClient && isPrismaConnected) {
+          prismaClient.friendship.update({ where: { id }, data: { status } }).catch(console.error);
+        }
         return data.friendships[idx];
       }
       return null;
@@ -389,6 +811,9 @@ export const db = {
     delete: (id: string) => {
       data.friendships = data.friendships.filter(f => f.id !== id);
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.friendship.delete({ where: { id } }).catch(console.error);
+      }
     }
   },
 
@@ -416,6 +841,12 @@ export const db = {
         });
       });
       saveDatabase();
+      if (prismaClient && isPrismaConnected) {
+        prismaClient.dMConversation.create({ data: { id: conv.id, is_group: conv.is_group, name: conv.name, icon_url: conv.icon_url } }).catch(console.error);
+        memberIds.forEach(uid => {
+          prismaClient?.dMMember.create({ data: { id: uuidv4(), dm_conversation_id: conv.id, user_id: uid } }).catch(console.error);
+        });
+      }
       return conv;
     },
     getMembers: (dm_conversation_id: string) => {

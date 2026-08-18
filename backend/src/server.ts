@@ -34,7 +34,12 @@ app.use('/api', apiRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString(), platform: 'Johncord API' });
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+    platform: 'Johncord API',
+    database: process.env.DATABASE_URL ? 'PostgreSQL (Cloud)' : 'Local File Cache'
+  });
 });
 
 // Socket.IO
@@ -47,10 +52,15 @@ const io = new SocketIOServer(server, {
 
 setupSocket(io);
 
-// Initialize DB & start server
-initDatabase();
+async function start() {
+  await initDatabase();
 
-server.listen(PORT, () => {
-  console.log(`🚀 Johncord Server running on http://localhost:${PORT}`);
-  console.log(`📡 Socket.IO server initialized.`);
+  server.listen(PORT, () => {
+    console.log(`🚀 Johncord Server running on http://localhost:${PORT}`);
+    console.log(`📡 Socket.IO server initialized.`);
+  });
+}
+
+start().catch(err => {
+  console.error('Failed to start server:', err);
 });
