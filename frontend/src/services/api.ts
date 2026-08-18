@@ -1,6 +1,9 @@
 import { handleMockAPI } from './mockBackend';
 
-const BASE_BACKEND_URL = (import.meta as any).env?.VITE_API_URL || '';
+const defaultUrl = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app')
+  ? 'https://johncord-backend.onrender.com'
+  : '';
+const BASE_BACKEND_URL = (import.meta as any).env?.VITE_API_URL || defaultUrl;
 const API_URL = BASE_BACKEND_URL ? (BASE_BACKEND_URL.endsWith('/api') ? BASE_BACKEND_URL : `${BASE_BACKEND_URL}/api`) : '/api';
 
 export async function apiRequest<T = any>(
@@ -30,7 +33,7 @@ export async function apiRequest<T = any>(
     
     // If the server returned HTML (e.g. Netlify 404 SPA fallback), fallback to client mock DB
     if (contentType.includes('text/html') || !contentType.includes('application/json')) {
-      console.warn(`[Johncord] Backend at ${API_URL} returned HTML instead of JSON. Falling back to in-browser demo database for ${endpoint}`);
+      console.warn(`[Johncord] Backend at ${API_URL} returned HTML instead of JSON. Falling back to in-browser database for ${endpoint}`);
       return await handleMockAPI(endpoint, options);
     }
 
@@ -47,14 +50,14 @@ export async function apiRequest<T = any>(
 
     return data;
   } catch (err: any) {
-    // If network failed (no backend running on host), seamlessly handle via mock database
+    // If network failed, seamlessly handle via mock database
     if (
       err.message?.includes('Unexpected token') ||
       err.message?.includes('Failed to fetch') ||
       err.message?.includes('NetworkError') ||
       err.message?.includes('is not valid JSON')
     ) {
-      console.warn(`[Johncord] Network or parse error for ${endpoint}. Using in-browser mock database.`);
+      console.warn(`[Johncord] Network error connecting to ${API_URL}${endpoint}. Using client storage.`);
       return await handleMockAPI(endpoint, options);
     }
     throw err;

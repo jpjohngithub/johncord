@@ -5,19 +5,22 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    const rawUrl = (import.meta as any).env?.VITE_API_URL || '';
+    const defaultUrl = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app')
+      ? 'https://johncord-backend.onrender.com'
+      : '';
+    const rawUrl = (import.meta as any).env?.VITE_API_URL || defaultUrl;
     const socketHost = rawUrl ? rawUrl.replace(/\/api\/?$/, '') : window.location.origin;
 
     socket = io(socketHost, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 2000,
-      timeout: 3000
+      timeout: 5000
     });
 
     socket.on('connect', () => {
-      console.log('⚡ Connected to Johncord Socket.IO Server');
+      console.log('⚡ Connected to Johncord Socket.IO Server at', socketHost);
       const userStr = localStorage.getItem('johncord_user');
       if (userStr) {
         try {
@@ -28,7 +31,7 @@ export function getSocket(): Socket {
     });
 
     socket.on('connect_error', () => {
-      // Gracefully silent in standalone Netlify mode
+      // Gracefully retry in background
     });
 
     // Bridge local broadcast events for standalone mode (Netlify / offline)
