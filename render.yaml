@@ -13,6 +13,6 @@ services:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        sync: false
+        value: "postgres://d8424c9f5c1a59f99871a67c16b90dd8f07f9fb949ee187aa5d233ccecf59b2e:sk_ReUn2yFt_wXsSWRlQoIMf@db.prisma.io:5432/postgres?sslmode=require"
     plan: free
     autoDeploy: true
