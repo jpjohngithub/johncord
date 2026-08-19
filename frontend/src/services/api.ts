@@ -1,17 +1,51 @@
 import { handleMockAPI } from './mockBackend';
 
-const defaultUrl = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app')
-  ? 'https://johncord-backend.onrender.com'
-  : '';
-const BASE_BACKEND_URL = (import.meta as any).env?.VITE_API_URL || defaultUrl;
-const API_URL = BASE_BACKEND_URL ? (BASE_BACKEND_URL.endsWith('/api') ? BASE_BACKEND_URL : `${BASE_BACKEND_URL}/api`) : '/api';
+// Priority: 1. Vite env var, 2. Netlify backend, 3. Localtunnel fallback, 4. Same origin
+const BACKEND_CANDIDATES = [
+  (import.meta as any).env?.VITE_API_URL,
+  'https://johncord-backend.onrender.com',
+  'https://johncord-backend-live.loca.lt',
+].filter(Boolean);
+
+const BASE_BACKEND_URL = BACKEND_CANDIDATES[0] || '';
+const API_URL = BASE_BACKEND_URL
+  ? (BASE_BACKEND_URL.endsWith('/api') ? BASE_BACKEND_URL : `${BASE_BACKEND_URL}/api`)
+  : '/api';
+
+let _workingApiUrl: string | null = null;
+
+async function findWorkingBackend(): Promise<string> {
+  if (_workingApiUrl) return _workingApiUrl;
+
+  for (const candidate of BACKEND_CANDIDATES) {
+    const url = candidate.endsWith('/api') ? candidate : `${candidate}/api`;
+    try {
+      const res = await fetch(`${url}/health`, {
+        signal: AbortSignal.timeout(4000),
+        headers: { 'bypass-tunnel-reminder': 'true' }
+      });
+      if (res.ok || res.status < 500) {
+        console.log(`[Johncord] ✅ Backend found at: ${url}`);
+        _workingApiUrl = url;
+        return url;
+      }
+    } catch {
+      // try next
+    }
+  }
+  console.warn('[Johncord] No backend reachable, using client storage');
+  _workingApiUrl = API_URL;
+  return API_URL;
+}
 
 export async function apiRequest<T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const workingUrl = await findWorkingBackend();
   const token = localStorage.getItem('johncord_token');
   const headers: Record<string, string> = {
+    'bypass-tunnel-reminder': 'true',
     ...(options.headers as Record<string, string>)
   };
 
@@ -24,23 +58,25 @@ export async function apiRequest<T = any>(
   }
 
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    const response = await fetch(`${workingUrl}${endpoint}`, {
       ...options,
-      headers
+      headers,
+      signal: options.signal || AbortSignal.timeout(10000)
     });
 
     const contentType = response.headers.get('content-type') || '';
-    
-    // If the server returned HTML (e.g. Netlify 404 SPA fallback), fallback to client mock DB
+
     if (contentType.includes('text/html') || !contentType.includes('application/json')) {
-      console.warn(`[Johncord] Backend at ${API_URL} returned HTML instead of JSON. Falling back to in-browser database for ${endpoint}`);
+      // Backend returned HTML — reset and try again or fallback
+      _workingApiUrl = null;
+      console.warn(`[Johncord] Backend returned HTML for ${endpoint}. Falling back to client storage.`);
       return await handleMockAPI(endpoint, options);
     }
 
     const data = await response.json();
 
     if (!response.ok) {
-      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/guest')) {
+      if (response.status === 401 && !endpoint.includes('/auth/')) {
         localStorage.removeItem('johncord_token');
         localStorage.removeItem('johncord_user');
         window.location.reload();
@@ -50,14 +86,15 @@ export async function apiRequest<T = any>(
 
     return data;
   } catch (err: any) {
-    // If network failed, seamlessly handle via mock database
     if (
-      err.message?.includes('Unexpected token') ||
       err.message?.includes('Failed to fetch') ||
       err.message?.includes('NetworkError') ||
-      err.message?.includes('is not valid JSON')
+      err.name === 'TimeoutError' ||
+      err.name === 'AbortError'
     ) {
-      console.warn(`[Johncord] Network error connecting to ${API_URL}${endpoint}. Using client storage.`);
+      // Reset cached URL so next call tries to find a new working backend
+      _workingApiUrl = null;
+      console.warn(`[Johncord] Network error. Using client storage for ${endpoint}`);
       return await handleMockAPI(endpoint, options);
     }
     throw err;

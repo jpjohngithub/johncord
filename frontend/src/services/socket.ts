@@ -2,25 +2,31 @@ import { io, Socket } from 'socket.io-client';
 import { subscribeLocalEvents } from './mockBackend';
 
 let socket: Socket | null = null;
+let socketAttempts = 0;
+
+const SOCKET_CANDIDATES = [
+  (import.meta as any).env?.VITE_API_URL?.replace(/\/api\/?$/, ''),
+  'https://johncord-backend.onrender.com',
+  'https://johncord-backend-live.loca.lt',
+].filter(Boolean);
 
 export function getSocket(): Socket {
   if (!socket) {
-    const defaultUrl = typeof window !== 'undefined' && window.location.hostname.includes('netlify.app')
-      ? 'https://johncord-backend.onrender.com'
-      : '';
-    const rawUrl = (import.meta as any).env?.VITE_API_URL || defaultUrl;
-    const socketHost = rawUrl ? rawUrl.replace(/\/api\/?$/, '') : window.location.origin;
+    const socketHost = SOCKET_CANDIDATES[socketAttempts % SOCKET_CANDIDATES.length] || window.location.origin;
 
     socket = io(socketHost, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      timeout: 5000
+      reconnectionAttempts: 8,
+      reconnectionDelay: 3000,
+      timeout: 6000,
+      extraHeaders: {
+        'bypass-tunnel-reminder': 'true'
+      }
     });
 
     socket.on('connect', () => {
-      console.log('⚡ Connected to Johncord Socket.IO Server at', socketHost);
+      console.log(`⚡ Connected to Johncord Socket.IO at ${socketHost}`);
       const userStr = localStorage.getItem('johncord_user');
       if (userStr) {
         try {
@@ -31,7 +37,7 @@ export function getSocket(): Socket {
     });
 
     socket.on('connect_error', () => {
-      // Gracefully retry in background
+      // Silently retry
     });
 
     // Bridge local broadcast events for standalone mode (Netlify / offline)
@@ -43,4 +49,11 @@ export function getSocket(): Socket {
   }
 
   return socket;
+}
+
+export function resetSocket() {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
 }
