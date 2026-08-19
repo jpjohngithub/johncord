@@ -2,27 +2,25 @@ import { io, Socket } from 'socket.io-client';
 import { subscribeLocalEvents } from './mockBackend';
 
 let socket: Socket | null = null;
-let socketAttempts = 0;
 
+const CLOUDFLARE_URL = 'https://circulation-noticed-significant-prints.trycloudflare.com';
 const SOCKET_CANDIDATES = [
+  CLOUDFLARE_URL,
   (import.meta as any).env?.VITE_API_URL?.replace(/\/api\/?$/, ''),
   'https://johncord-backend.onrender.com',
-  'https://johncord-backend-live.loca.lt',
 ].filter(Boolean);
 
 export function getSocket(): Socket {
   if (!socket) {
-    const socketHost = SOCKET_CANDIDATES[socketAttempts % SOCKET_CANDIDATES.length] || window.location.origin;
+    const socketHost = SOCKET_CANDIDATES[0] || window.location.origin;
 
     socket = io(socketHost, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 8,
-      reconnectionDelay: 3000,
-      timeout: 6000,
-      extraHeaders: {
-        'bypass-tunnel-reminder': 'true'
-      }
+      reconnectionAttempts: 15,
+      reconnectionDelay: 2000,
+      timeout: 8000,
+      transports: ['websocket', 'polling']
     });
 
     socket.on('connect', () => {
@@ -36,8 +34,8 @@ export function getSocket(): Socket {
       }
     });
 
-    socket.on('connect_error', () => {
-      // Silently retry
+    socket.on('connect_error', (err) => {
+      console.warn('Socket.IO connection attempt warning:', err.message);
     });
 
     // Bridge local broadcast events for standalone mode (Netlify / offline)

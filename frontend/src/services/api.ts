@@ -1,10 +1,11 @@
 import { handleMockAPI } from './mockBackend';
 
-// Priority: 1. Vite env var, 2. Netlify backend, 3. Localtunnel fallback, 4. Same origin
+// Priority order: 1. Live Cloudflare tunnel, 2. Vite env var, 3. Render, 4. Same origin
+const CLOUDFLARE_URL = 'https://circulation-noticed-significant-prints.trycloudflare.com';
 const BACKEND_CANDIDATES = [
+  CLOUDFLARE_URL,
   (import.meta as any).env?.VITE_API_URL,
   'https://johncord-backend.onrender.com',
-  'https://johncord-backend-live.loca.lt',
 ].filter(Boolean);
 
 const BASE_BACKEND_URL = BACKEND_CANDIDATES[0] || '';
@@ -25,7 +26,7 @@ async function findWorkingBackend(): Promise<string> {
         headers: { 'bypass-tunnel-reminder': 'true' }
       });
       if (res.ok || res.status < 500) {
-        console.log(`[Johncord] ✅ Backend found at: ${url}`);
+        console.log(`[Johncord] ✅ Live Backend connected at: ${url}`);
         _workingApiUrl = url;
         return url;
       }
@@ -33,7 +34,7 @@ async function findWorkingBackend(): Promise<string> {
       // try next
     }
   }
-  console.warn('[Johncord] No backend reachable, using client storage');
+  console.warn('[Johncord] No backend reachable, using client storage fallback');
   _workingApiUrl = API_URL;
   return API_URL;
 }
@@ -67,7 +68,6 @@ export async function apiRequest<T = any>(
     const contentType = response.headers.get('content-type') || '';
 
     if (contentType.includes('text/html') || !contentType.includes('application/json')) {
-      // Backend returned HTML — reset and try again or fallback
       _workingApiUrl = null;
       console.warn(`[Johncord] Backend returned HTML for ${endpoint}. Falling back to client storage.`);
       return await handleMockAPI(endpoint, options);
@@ -92,7 +92,6 @@ export async function apiRequest<T = any>(
       err.name === 'TimeoutError' ||
       err.name === 'AbortError'
     ) {
-      // Reset cached URL so next call tries to find a new working backend
       _workingApiUrl = null;
       console.warn(`[Johncord] Network error. Using client storage for ${endpoint}`);
       return await handleMockAPI(endpoint, options);
