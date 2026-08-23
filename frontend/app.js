@@ -231,7 +231,7 @@ function handle(d) {
     case 'voiceState':
       S.voiceStates = d.states;
       renderSidebar();
-      renderVoiceStage();
+      renderVoiceRoom();
       syncVoicePeers();
       break;
     case 'voicePeers':
@@ -303,6 +303,10 @@ function openServer(id) {
   const firstText = srv.channels.find(c => c.type === 'text');
   S.channelId = id === 'geral' ? 'geral-chat' : (firstText ? firstText.id : null);
   S.dmId = null;
+  
+  if ($('chatView')) $('chatView').style.display = 'flex';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+
   renderRail();
   renderSidebar();
   renderHeader();
@@ -313,14 +317,44 @@ function openServer(id) {
 function openChannel(chId) {
   S.channelId = chId;
   S.lastAuthor = null;
+  const srv = currentServer();
+  const ch = srv && srv.channels.find(c => c.id === chId);
+
+  if (ch && ch.type === 'voice') {
+    // ABA DEDICADA DA CALL / TRANSMISSÃO
+    if ($('chatView')) $('chatView').style.display = 'none';
+    if ($('voiceRoomView')) $('voiceRoomView').style.display = 'flex';
+    if (!S.voice || S.voice.channelId !== chId || S.voice.serverId !== srv.id) {
+      joinVoice(srv.id, chId);
+    }
+    renderVoiceRoom();
+  } else {
+    // ABA DE CHAT DE TEXTO
+    if ($('chatView')) $('chatView').style.display = 'flex';
+    if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+    requestHistory();
+  }
+
   renderSidebar();
   renderHeader();
-  requestHistory();
+}
+
+function openVoiceRoomView() {
+  if (!S.voice) return;
+  S.view = S.voice.serverId;
+  S.channelId = S.voice.channelId;
+  if ($('chatView')) $('chatView').style.display = 'none';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'flex';
+  renderSidebar();
+  renderHeader();
+  renderVoiceRoom();
 }
 
 function openHome() {
   S.view = 'home';
   S.dmId = null;
+  if ($('chatView')) $('chatView').style.display = 'flex';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
   renderRail();
   renderSidebar();
   renderHeader();
@@ -331,6 +365,8 @@ function openDm(dmId) {
   S.view = 'home';
   S.dmId = dmId;
   S.lastAuthor = null;
+  if ($('chatView')) $('chatView').style.display = 'flex';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
   renderSidebar(); renderHeader(); renderHomeMain();
   if (!S.dms[dmId] || !S.dms[dmId].messages) {
     S.dms[dmId] = S.dms[dmId] || {};
@@ -830,7 +866,7 @@ function setUserVolume(userId, vol) {
   if (audio) audio.volume = S.deafened ? 0 : Math.min(1, val / 100);
   const video = document.getElementById('video-' + userId);
   if (video) video.volume = S.deafened ? 0 : Math.min(1, val / 100);
-  renderVoiceStage();
+  renderVoiceRoom();
 }
 
 function openVolumeModal(userId, username) {
@@ -876,7 +912,7 @@ async function joinVoice(serverId, channelId) {
     S.screenSharing = false;
     updateVoiceButtons();
     updateVoiceBar(serverId, channelId);
-    renderVoiceStage();
+    renderVoiceRoom();
     send({ t: 'voiceJoin', serverId, channelId });
   } catch (e) {
     toast('⚠ Microfone bloqueado! Permita o acesso ao microfone no navegador.');
@@ -894,7 +930,7 @@ function leaveVoice() {
   S.screenSharing = false;
   updateVoiceButtons();
   updateVoiceBar(null);
-  renderVoiceStage();
+  renderVoiceRoom();
 }
 
 function toggleMute() {
@@ -907,7 +943,7 @@ function toggleMute() {
   send({ t: 'voiceMute', muted: S.muted });
   updateVoiceButtons();
   updateVoiceBar(S.voice ? S.voice.serverId : null, S.voice ? S.voice.channelId : null);
-  renderVoiceStage();
+  renderVoiceRoom();
 }
 
 function toggleDeafen() {
@@ -930,7 +966,7 @@ function toggleDeafen() {
   send({ t: 'voiceMute', muted: S.muted });
   updateVoiceButtons();
   updateVoiceBar(S.voice ? S.voice.serverId : null, S.voice ? S.voice.channelId : null);
-  renderVoiceStage();
+  renderVoiceRoom();
 }
 
 function updateVoiceButtons() {
@@ -973,7 +1009,7 @@ async function toggleScreenShare() {
     };
 
     updateVoiceBar(S.voice.serverId, S.voice.channelId);
-    renderVoiceStage();
+    renderVoiceRoom();
     toast('🖥️ Compartilhamento de tela iniciado!');
   } catch (err) {
     if (err.name !== 'NotAllowedError') {
@@ -994,8 +1030,33 @@ function stopScreenShare(notify = true) {
       createOffer(pc, pid);
     }
     if (S.voice) updateVoiceBar(S.voice.serverId, S.voice.channelId);
-    renderVoiceStage();
+    renderVoiceRoom();
     toast('🛑 Compartilhamento de tela finalizado.');
+  }
+}
+
+function toggleFullscreen(element) {
+  if (!element) return;
+  if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+    if (element.requestFullscreen) {
+      element.requestFullscreen().catch(() => {});
+    } else if (element.webkitRequestFullscreen) {
+      element.webkitRequestFullscreen();
+    } else if (element.mozRequestFullScreen) {
+      element.mozRequestFullScreen();
+    } else if (element.msRequestFullscreen) {
+      element.msRequestFullscreen();
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    } else if (document.mozCancelFullScreen) {
+      document.mozCancelFullScreen();
+    } else if (document.msExitFullscreen) {
+      document.msExitFullscreen();
+    }
   }
 }
 
@@ -1009,7 +1070,7 @@ function updateVoiceBar(serverId, channelId) {
   const bar = document.createElement('div');
   bar.className = 'call-bar';
   bar.innerHTML = `
-    <div class="call-info">🔊 Conectado — ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
+    <div class="call-info" style="cursor:pointer" id="cbInfo" title="Clique para abrir a tela da call">🔊 Conectado — ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
     <div class="call-btns">
       <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${S.muted ? '🔇 Mudo' : '🎙️ Falando'}</button>
       <button class="call-btn${S.deafened ? ' on' : ''}" id="cbDeafen">${S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Ouvindo'}</button>
@@ -1017,66 +1078,118 @@ function updateVoiceBar(serverId, channelId) {
       <button class="call-btn danger" id="cbLeave">📞 Sair</button>
     </div>`;
   $('userPanel').parentNode.insertBefore(bar, $('userPanel'));
+  $('cbInfo').onclick = openVoiceRoomView;
   $('cbMute').onclick = toggleMute;
   $('cbDeafen').onclick = toggleDeafen;
   $('cbScreen').onclick = toggleScreenShare;
   $('cbLeave').onclick = leaveVoice;
 }
 
-function renderVoiceStage() {
-  const stage = $('voiceStage');
+function updateVoiceControls() {
+  const btnM = $('vrBtnMute');
+  const btnD = $('vrBtnDeafen');
+  const btnS = $('vrBtnScreen');
+  if (btnM) {
+    btnM.textContent = S.muted ? '🔇 Microfone Mutado' : '🎤 Microfone Ativo';
+    btnM.classList.toggle('on', S.muted);
+  }
+  if (btnD) {
+    btnD.textContent = S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Áudio Ativo';
+    btnD.classList.toggle('on', S.deafened);
+  }
+  if (btnS) {
+    btnS.textContent = S.screenSharing ? '🛑 Parar Transmissão' : '🖥️ Compartilhar Tela';
+    btnS.classList.toggle('live', S.screenSharing);
+  }
+}
+
+if ($('vrBtnMute')) $('vrBtnMute').onclick = toggleMute;
+if ($('vrBtnDeafen')) $('vrBtnDeafen').onclick = toggleDeafen;
+if ($('vrBtnScreen')) $('vrBtnScreen').onclick = toggleScreenShare;
+if ($('vrBtnChat')) {
+  $('vrBtnChat').onclick = () => {
+    const srv = currentServer();
+    const firstText = srv ? srv.channels.find(c => c.type === 'text') : null;
+    if (firstText) openChannel(firstText.id);
+    else {
+      if ($('chatView')) $('chatView').style.display = 'flex';
+      if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+    }
+  };
+}
+if ($('vrBtnLeave')) $('vrBtnLeave').onclick = leaveVoice;
+
+function renderVoiceRoom() {
+  const stage = $('voiceRoomStage');
   if (!stage) return;
-  if (!S.voice) {
-    stage.style.display = 'none';
+  
+  const currentCh = currentServer()?.channels?.find(c => c.id === S.channelId);
+  const isVoiceTab = currentCh && currentCh.type === 'voice';
+
+  if (!isVoiceTab && !S.voice) {
     stage.innerHTML = '';
     return;
   }
-  stage.style.display = 'flex';
-  const srv = S.servers.find(s => s.id === S.voice.serverId);
-  const ch = srv && srv.channels.find(c => c.id === S.voice.channelId);
-  const users = ((S.voiceStates[S.voice.serverId] || {})[S.voice.channelId]) || [];
 
-  let html = `
-    <div class="stage-header">
-      <span>🔊 ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : 'Call')} (${users.length} participante${users.length === 1 ? '' : 's'})</span>
-      <button class="btn btn-small btn-primary" id="btnStageScreen">${S.screenSharing ? '🛑 Parar Transmissão' : '🖥️ Compartilhar Tela'}</button>
-    </div>
-    <div class="stage-grid" id="stageGrid"></div>
-  `;
-  stage.innerHTML = html;
-  $('btnStageScreen').onclick = toggleScreenShare;
-  const grid = $('stageGrid');
+  const srvId = S.voice ? S.voice.serverId : S.view;
+  const chId = S.voice ? S.voice.channelId : S.channelId;
+  const users = ((S.voiceStates[srvId] || {})[chId]) || [];
 
-  // Tile do próprio usuário
+  const hasAnyScreen = S.screenSharing || users.some(u => u.screenSharing);
+
+  const grid = document.createElement('div');
+  grid.className = 'vr-grid' + (hasAnyScreen ? ' has-screen' : '');
+
+  // Card do Usuário Local
   const myTile = document.createElement('div');
-  myTile.className = 'stage-tile';
+  myTile.className = 'vr-tile' + (S.screenSharing ? ' is-screen' : '');
+  
   if (S.screenSharing && screenStream) {
     const v = document.createElement('video');
     v.autoplay = true;
     v.muted = true;
     v.playsInline = true;
     v.srcObject = screenStream;
+    v.title = "Clique duplo para Tela Cheia";
+    v.ondblclick = () => toggleFullscreen(v);
     myTile.appendChild(v);
+    const hint = document.createElement('div');
+    hint.className = 'fullscreen-hint';
+    hint.textContent = '⛶ Duplo clique para Tela Cheia';
+    myTile.appendChild(hint);
   } else {
     myTile.innerHTML = `
-      <div class="stage-tile-avatar">
+      <div class="vr-tile-avatar">
         <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${(S.user?.username || '?')[0].toUpperCase()}</div>
+        <span style="font-weight:600;font-size:15px;color:var(--header)">${esc(S.user?.username || 'Você')}</span>
       </div>
     `;
   }
+
   const myOverlay = document.createElement('div');
-  myOverlay.className = 'stage-tile-overlay';
+  myOverlay.className = 'vr-tile-overlay';
   myOverlay.innerHTML = `
     <span>${esc(S.user?.username || 'Você')} (Você)${S.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
-    <span>${S.deafened ? '🎧🔇' : (S.muted ? '🔇' : '🎙️')}</span>
+    <div class="vr-actions">
+      <span>${S.deafened ? '🎧🔇' : (S.muted ? '🔇' : '🎙️')}</span>
+      ${S.screenSharing ? `<button class="vr-action-btn" id="myFsBtn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
+    </div>
   `;
+  const myFs = myOverlay.querySelector('#myFsBtn');
+  if (myFs) {
+    myFs.onclick = (e) => {
+      e.stopPropagation();
+      const vid = myTile.querySelector('video');
+      if (vid) toggleFullscreen(vid);
+    };
+  }
   myTile.appendChild(myOverlay);
   grid.appendChild(myTile);
 
-  // Tiles dos outros usuários
+  // Cards dos Outros Usuários na Call
   users.filter(u => u.id !== S.user?.id).forEach(u => {
     const tile = document.createElement('div');
-    tile.className = 'stage-tile';
+    tile.className = 'vr-tile' + (u.screenSharing ? ' is-screen' : '');
     const remoteVid = document.getElementById('video-' + u.id);
 
     if (u.screenSharing && remoteVid && remoteVid.srcObject) {
@@ -1084,39 +1197,52 @@ function renderVoiceStage() {
       v.autoplay = true;
       v.playsInline = true;
       v.srcObject = remoteVid.srcObject;
+      v.title = "Clique duplo para Tela Cheia";
+      v.ondblclick = () => toggleFullscreen(v);
       tile.appendChild(v);
+      const hint = document.createElement('div');
+      hint.className = 'fullscreen-hint';
+      hint.textContent = '⛶ Duplo clique para Tela Cheia';
+      tile.appendChild(hint);
     } else {
       tile.innerHTML = `
-        <div class="stage-tile-avatar">
+        <div class="vr-tile-avatar">
           <div class="user-avatar" style="background:${u.color || '#5865f2'}">${(u.username || '?')[0].toUpperCase()}</div>
+          <span style="font-weight:600;font-size:15px;color:var(--header)">${esc(u.username)}</span>
         </div>
       `;
     }
 
     const overlay = document.createElement('div');
-    overlay.className = 'stage-tile-overlay';
+    overlay.className = 'vr-tile-overlay';
     overlay.innerHTML = `
       <span>${esc(u.username)}${u.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
-      <div style="display:flex;align-items:center;gap:6px">
+      <div class="vr-actions">
         <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
-        <button class="fullscreen-btn btn-vol-adj" title="Volume">🔊 ${getUserVolume(u.id)}%</button>
-        ${u.screenSharing ? `<button class="fullscreen-btn btn-fs" title="Tela Cheia">⛶</button>` : ''}
+        <button class="vr-action-btn vr-vol-btn" title="Ajustar Volume">🔊 ${getUserVolume(u.id)}%</button>
+        ${u.screenSharing ? `<button class="vr-action-btn vr-fs-btn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
       </div>
     `;
-    const volBtn = overlay.querySelector('.btn-vol-adj');
-    if (volBtn) volBtn.onclick = () => openVolumeModal(u.id, u.username);
 
-    const fsBtn = overlay.querySelector('.btn-fs');
+    const volBtn = overlay.querySelector('.vr-vol-btn');
+    if (volBtn) volBtn.onclick = (e) => { e.stopPropagation(); openVolumeModal(u.id, u.username); };
+
+    const fsBtn = overlay.querySelector('.vr-fs-btn');
     if (fsBtn) {
-      fsBtn.onclick = () => {
+      fsBtn.onclick = (e) => {
+        e.stopPropagation();
         const vid = tile.querySelector('video');
-        if (vid && vid.requestFullscreen) vid.requestFullscreen();
+        if (vid) toggleFullscreen(vid);
       };
     }
 
     tile.appendChild(overlay);
     grid.appendChild(tile);
   });
+
+  stage.innerHTML = '';
+  stage.appendChild(grid);
+  updateVoiceControls();
 }
 
 function getPeer(peerId, initiator) {
@@ -1143,7 +1269,7 @@ function getPeer(peerId, initiator) {
         document.body.appendChild(video);
       }
       video.srcObject = e.streams[0];
-      renderVoiceStage();
+      renderVoiceRoom();
     } else {
       let audio = document.getElementById('audio-' + peerId);
       if (!audio) {
@@ -1189,7 +1315,7 @@ function syncVoicePeers() {
   inChan.forEach(pid => {
     if (!peers[pid] && S.user?.id > pid) getPeer(pid, true);
   });
-  renderVoiceStage();
+  renderVoiceRoom();
 }
 
 async function handleSignal(from, data) {

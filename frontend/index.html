@@ -69,8 +69,8 @@
       </div>
     </header>
     <div class="main-body">
-      <div class="chat-wrap">
-        <div id="voiceStage" class="voice-stage" style="display:none"></div>
+      <!-- ABA DE CHAT DE TEXTO -->
+      <div id="chatView" class="chat-wrap">
         <div id="messages" class="messages"></div>
         <div id="typingIndicator" class="typing-indicator"></div>
         <div class="composer-wrap">
@@ -80,6 +80,19 @@
           </div>
         </div>
       </div>
+
+      <!-- ABA DEDICADA DA CALL / TRANSMISSÃO DE TELA -->
+      <div id="voiceRoomView" class="voice-room-view" style="display:none">
+        <div class="voice-room-stage" id="voiceRoomStage"></div>
+        <div class="voice-room-controls" id="voiceRoomControls">
+          <button class="vr-btn" id="vrBtnMute" title="Silenciar Microfone">🎤 Microfone</button>
+          <button class="vr-btn" id="vrBtnDeafen" title="Ensurdecer">🎧 Áudio</button>
+          <button class="vr-btn primary" id="vrBtnScreen" title="Compartilhar Tela">🖥️ Compartilhar Tela</button>
+          <button class="vr-btn" id="vrBtnChat" title="Alternar para Chat de Texto">💬 Chat de Texto</button>
+          <button class="vr-btn danger" id="vrBtnLeave" title="Desconectar da Call">📞 Desconectar</button>
+        </div>
+      </div>
+
       <aside id="memberList" class="member-list"></aside>
     </div>
   </main>
