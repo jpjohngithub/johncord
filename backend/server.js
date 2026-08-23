@@ -225,10 +225,10 @@ wss.on('connection', (ws) => {
         if (dn.length >= 1 && dn.length <= 32) user.displayName = dn;
       }
       if (d.bio !== undefined) user.bio = String(d.bio).slice(0, 200);
-      if (d.bannerColor && typeof d.bannerColor === 'string') user.bannerColor = d.bannerColor.slice(0, 20);
-      if (d.color && typeof d.color === 'string') user.color = d.color.slice(0, 20);
-      if (d.customStatus !== undefined) user.customStatus = String(d.customStatus).slice(0, 80);
-      if (d.avatar !== undefined) user.avatar = String(d.avatar).slice(0, 10);
+      if (d.bannerColor && typeof d.bannerColor === 'string') user.bannerColor = d.bannerColor.slice(0, 3000);
+      if (d.color && typeof d.color === 'string') user.color = d.color.slice(0, 50);
+      if (d.customStatus !== undefined) user.customStatus = String(d.customStatus).slice(0, 100);
+      if (d.avatar !== undefined) user.avatar = String(d.avatar).slice(0, 3000);
       save();
       me = user;
       send(ws, { t: 'profileUpdated', user: getUserPublic(me.id) });
@@ -302,8 +302,8 @@ wss.on('connection', (ws) => {
     if (d.t === 'createServer') {
       const name = String(d.name || '').trim().slice(0, 30);
       if (name.length < 2) return send(ws, { t: 'err', error: 'Nome muito curto.' });
-      const icon = d.icon ? String(d.icon).slice(0, 100) : name[0].toUpperCase();
-      const banner = d.banner ? String(d.banner).slice(0, 50) : '#5865f2';
+      const icon = d.icon ? String(d.icon).slice(0, 3000) : name[0].toUpperCase();
+      const banner = d.banner ? String(d.banner).slice(0, 3000) : '#5865f2';
       
       const roleDono = {
         id: uid(),
@@ -363,8 +363,8 @@ wss.on('connection', (ws) => {
       const srv = db.servers[d.serverId];
       if (!srv || !hasServerPerm(srv.id, me.id, 'manageServer')) return;
       if (d.name) srv.name = String(d.name).trim().slice(0, 30);
-      if (d.icon) srv.icon = String(d.icon).slice(0, 100);
-      if (d.banner) srv.banner = String(d.banner).slice(0, 50);
+      if (d.icon) srv.icon = String(d.icon).slice(0, 3000);
+      if (d.banner) srv.banner = String(d.banner).slice(0, 3000);
       save();
       pushServerToMembers(srv);
       return;

@@ -1786,9 +1786,23 @@ function openVolumeModal(userId, username) {
 /* ---------- Voz / WebRTC / Compartilhamento de Tela & Call Timer ---------- */
 let localStream = null;
 let screenStream = null;
-const peers = {};   // userId -> RTCPeerConnection
+const peers = {};               // userId -> RTCPeerConnection
+const pendingCandidates = {};   // userId -> Array of RTCIceCandidateInit
 let voiceStartTime = null;
 let voiceTimerInterval = null;
+let globalAudioCtx = null;
+
+function unlockAudioContext() {
+  try {
+    if (!globalAudioCtx) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) globalAudioCtx = new AudioContextClass();
+    }
+    if (globalAudioCtx && globalAudioCtx.state === 'suspended') {
+      globalAudioCtx.resume();
+    }
+  } catch (e) {}
+}
 
 function startVoiceTimer() {
   if (voiceTimerInterval) clearInterval(voiceTimerInterval);
@@ -1830,8 +1844,19 @@ function updateVoiceTimerDisplay() {
 }
 
 async function joinVoice(serverId, channelId) {
+  unlockAudioContext();
   try {
-    if (!localStream) localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!localStream) {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      });
+    }
+    localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
     S.voice = { serverId, channelId };
     S.muted = false;
     S.deafened = false;
@@ -1851,7 +1876,9 @@ function leaveVoice() {
   stopVoiceTimer();
   Object.values(peers).forEach(pc => pc.close());
   for (const k of Object.keys(peers)) delete peers[k];
+  for (const k of Object.keys(pendingCandidates)) delete pendingCandidates[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
   if (S.voice) { send({ t: 'voiceLeave' }); S.voice = null; }
   S.muted = false;
   S.deafened = false;
@@ -2158,10 +2185,15 @@ function renderVoiceRoom() {
     // Minha miniatura na barra
     const myStrip = document.createElement('div');
     myStrip.className = 'vr-strip-tile' + (S.spotlightUser === S.user?.id ? ' active' : '');
-    myStrip.innerHTML = `
-      <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${S.user?.avatar || (S.user?.displayName || S.user?.username || '?')[0].toUpperCase()}</div>
-      <span class="vr-strip-name">${esc(S.user?.displayName || S.user?.username || 'Você')} (Você)</span>
-    `;
+    const myStripAv = document.createElement('div');
+    myStripAv.className = 'user-avatar';
+    setAvatar(myStripAv, S.user);
+    myStrip.appendChild(myStripAv);
+    const myStripName = document.createElement('span');
+    myStripName.className = 'vr-strip-name';
+    myStripName.textContent = `${S.user?.displayName || S.user?.username || 'Você'} (Você)`;
+    myStrip.appendChild(myStripName);
+
     if (S.screenSharing) {
       myStrip.onclick = () => { S.spotlightUser = S.user?.id; renderVoiceRoom(); };
       myStrip.title = "Clique para focar na sua transmissão";
@@ -2173,12 +2205,20 @@ function renderVoiceRoom() {
       const uStrip = document.createElement('div');
       uStrip.className = 'vr-strip-tile' + (S.spotlightUser === u.id ? ' active' : '');
       const hasScreen = u.screenSharing;
-      uStrip.innerHTML = `
-        <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (u.displayName || u.username || '?')[0].toUpperCase()}</div>
-        <span class="vr-strip-name">${esc(u.displayName || u.username)}</span>
-        ${hasScreen ? `<span class="badge-live-pulse" style="font-size:9px;padding:1px 4px;margin-top:2px">AO VIVO</span>` : ''}
-      `;
+      const uStripAv = document.createElement('div');
+      uStripAv.className = 'user-avatar';
+      setAvatar(uStripAv, u);
+      uStrip.appendChild(uStripAv);
+      const uStripName = document.createElement('span');
+      uStripName.className = 'vr-strip-name';
+      uStripName.textContent = u.displayName || u.username;
+      uStrip.appendChild(uStripName);
       if (hasScreen) {
+        const liveBadge = document.createElement('span');
+        liveBadge.className = 'badge-live-pulse';
+        liveBadge.style.cssText = 'font-size:9px;padding:1px 4px;margin-top:2px';
+        liveBadge.textContent = 'AO VIVO';
+        uStrip.appendChild(liveBadge);
         uStrip.onclick = () => { S.spotlightUser = u.id; renderVoiceRoom(); };
         uStrip.title = "Clique para focar nesta transmissão";
       }
@@ -2220,16 +2260,21 @@ function renderVoiceRoom() {
     const myTag = `@${S.user?.username || ''}`;
     const myCustom = S.user?.customStatus ? `<span class="vr-user-status">${esc(S.user.customStatus)}</span>` : '';
     
-    myTile.innerHTML = `
-      <div class="vr-tile-avatar">
-        <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${S.user?.avatar || (myDispName || S.user?.username || '?')[0].toUpperCase()}</div>
-        <div class="vr-user-name-box">
-          <span class="vr-display-name">${esc(myDispName)} (Você)</span>
-          <span class="vr-user-tag">${esc(myTag)}</span>
-          ${myCustom}
-        </div>
-      </div>
+    const tileAvatarBox = document.createElement('div');
+    tileAvatarBox.className = 'vr-tile-avatar';
+    const av = document.createElement('div');
+    av.className = 'user-avatar';
+    setAvatar(av, S.user);
+    tileAvatarBox.appendChild(av);
+    const nameBox = document.createElement('div');
+    nameBox.className = 'vr-user-name-box';
+    nameBox.innerHTML = `
+      <span class="vr-display-name">${esc(myDispName)} (Você)</span>
+      <span class="vr-user-tag">${esc(myTag)}</span>
+      ${myCustom}
     `;
+    tileAvatarBox.appendChild(nameBox);
+    myTile.appendChild(tileAvatarBox);
   }
 
   const myOverlay = document.createElement('div');
@@ -2284,27 +2329,36 @@ function renderVoiceRoom() {
       hint.textContent = '⛶ Duplo clique para Tela Cheia';
       tile.appendChild(hint);
     } else if (u.screenSharing) {
-      tile.innerHTML = `
-        <div class="vr-tile-avatar">
-          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (u.displayName || u.username || '?')[0].toUpperCase()}</div>
-          <span class="badge-live-pulse" style="margin-top:8px">📡 Conectando Transmissão...</span>
-        </div>
-      `;
+      const tileAvatarBox = document.createElement('div');
+      tileAvatarBox.className = 'vr-tile-avatar';
+      const av = document.createElement('div');
+      av.className = 'user-avatar';
+      setAvatar(av, u);
+      tileAvatarBox.appendChild(av);
+      tileAvatarBox.innerHTML += `<span class="badge-live-pulse" style="margin-top:8px">📡 Conectando Transmissão...</span>`;
+      tile.appendChild(tileAvatarBox);
     } else {
       const uDispName = u.displayName || u.username;
       const uTag = `@${u.username}`;
       const uCustom = u.customStatus ? `<span class="vr-user-status">${esc(u.customStatus)}</span>` : '';
       
-      tile.innerHTML = `
-        <div class="vr-tile-avatar" style="cursor:pointer" onclick="openUserProfileModal('${u.id}')">
-          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (uDispName || u.username || '?')[0].toUpperCase()}</div>
-          <div class="vr-user-name-box">
-            <span class="vr-display-name">${esc(uDispName)}</span>
-            <span class="vr-user-tag">${esc(uTag)}</span>
-            ${uCustom}
-          </div>
-        </div>
+      const tileAvatarBox = document.createElement('div');
+      tileAvatarBox.className = 'vr-tile-avatar';
+      tileAvatarBox.style.cursor = 'pointer';
+      tileAvatarBox.onclick = () => openUserProfileModal(u.id);
+      const av = document.createElement('div');
+      av.className = 'user-avatar';
+      setAvatar(av, u);
+      tileAvatarBox.appendChild(av);
+      const nameBox = document.createElement('div');
+      nameBox.className = 'vr-user-name-box';
+      nameBox.innerHTML = `
+        <span class="vr-display-name">${esc(uDispName)}</span>
+        <span class="vr-user-tag">${esc(uTag)}</span>
+        ${uCustom}
       `;
+      tileAvatarBox.appendChild(nameBox);
+      tile.appendChild(tileAvatarBox);
     }
 
     const overlay = document.createElement('div');
@@ -2354,11 +2408,15 @@ function renderVoiceRoom() {
 
 function getPeer(peerId, initiator) {
   if (peers[peerId]) return peers[peerId];
+  if (!pendingCandidates[peerId]) pendingCandidates[peerId] = [];
+
   const pc = new RTCPeerConnection({
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' }
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
     ]
   });
   peers[peerId] = pc;
@@ -2377,6 +2435,7 @@ function getPeer(peerId, initiator) {
   };
   
   pc.ontrack = e => {
+    unlockAudioContext();
     const stream = e.streams[0] || new MediaStream([e.track]);
     if (e.track.kind === 'video') {
       let video = document.getElementById('video-' + peerId);
@@ -2404,6 +2463,7 @@ function getPeer(peerId, initiator) {
         audio.id = 'audio-' + peerId;
         audio.autoplay = true;
         audio.playsInline = true;
+        audio.className = 'remote-audio';
         audio.style.position = 'fixed';
         audio.style.top = '-9999px';
         audio.style.left = '-9999px';
@@ -2415,7 +2475,7 @@ function getPeer(peerId, initiator) {
       audio.muted = S.deafened;
       audio.volume = S.deafened ? 0 : Math.min(1, Math.max(0, getUserVolume(peerId) / 100));
       
-      const tryPlayAudio = () => {
+      const tryPlay = () => {
         audio.play().catch(() => {
           const unlock = () => {
             audio.play().catch(() => {});
@@ -2426,7 +2486,7 @@ function getPeer(peerId, initiator) {
           document.addEventListener('keydown', unlock, { once: true });
         });
       };
-      tryPlayAudio();
+      tryPlay();
     }
   };
   
@@ -2457,6 +2517,7 @@ function syncVoicePeers() {
     if (!inChan.includes(pid)) {
       peers[pid].close();
       delete peers[pid];
+      delete pendingCandidates[pid];
       const a = document.getElementById('audio-' + pid);
       if (a) a.remove();
       const v = document.getElementById('video-' + pid);
@@ -2464,10 +2525,15 @@ function syncVoicePeers() {
       if (S.spotlightUser === pid) S.spotlightUser = null;
     }
   }
-  inChan.forEach(pid => {
-    if (!peers[pid]) getPeer(pid, S.user?.id > pid);
-  });
   renderVoiceRoom();
+}
+
+async function flushPendingCandidates(peerId, pc) {
+  const list = pendingCandidates[peerId] || [];
+  pendingCandidates[peerId] = [];
+  for (const c of list) {
+    try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {}
+  }
 }
 
 async function handleSignal(from, data) {
@@ -2481,15 +2547,22 @@ async function handleSignal(from, data) {
         });
       }
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      await flushPendingCandidates(from, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       send({ t: 'signal', to: from, data: { type: 'answer', sdp: pc.localDescription } });
     } else if (data.type === 'answer') {
       if (pc.signalingState !== 'stable') {
         await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        await flushPendingCandidates(from, pc);
       }
     } else if (data.type === 'candidate' && data.candidate) {
-      await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+      } else {
+        if (!pendingCandidates[from]) pendingCandidates[from] = [];
+        pendingCandidates[from].push(data.candidate);
+      }
     }
   } catch (e) {}
 }
