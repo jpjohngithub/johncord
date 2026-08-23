@@ -30,3 +30,23 @@ Para amigos acessarem na mesma rede, use seu IP local (ex: `http://192.168.x.x:3
 - `ws` para WebSocket
 - WebRTC para voz (STUN público)
 - HTML/CSS/JS vanilla no frontend
+
+## 🌐 Deploy online (Render)
+
+O projeto está pronto para hospedar gratuitamente no [Render](https://render.com):
+
+1. Crie um **Web Service** conectando este repositório
+2. O `render.yaml` já está configurado (Node.js, `npm install` + `npm start`)
+3. A porta é detectada automaticamente via variável `PORT`
+4. WebSockets funcionam nativamente; calls de voz funcionam pois o Render serve em HTTPS
+
+## 🧪 Testes
+
+Com o servidor rodando:
+
+```bash
+node test-ws.js
+```
+
+Cobre: registro, chat em tempo real, DMs, histórico, membros, criação de servidores/canais, convites, entrada/saída/mudo em call e sinalização WebRTC.
+

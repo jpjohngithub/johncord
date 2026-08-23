@@ -102,7 +102,7 @@ function pushServerToMembers(server) {
 function sysMsg(serverId, channelId, text) {
   const srv = db.servers[serverId];
   const ch = srv && srv.channels.find(c => c.id === channelId);
-  if (!ch) return;
+  if (!ch || ch.type !== 'text') return;
   if (!ch.messages) ch.messages = [];
   ch.messages.push({ id: uid(), system: true, content: text, ts: Date.now() });
   if (ch.messages.length > 500) ch.messages.splice(0, ch.messages.length - 500);

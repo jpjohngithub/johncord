@@ -49,7 +49,16 @@ function handle(d) {
       break;
     case 'presence':
       S.presence = d.users;
+      (S.friends || []).forEach(f => {
+        const u = d.users.find(x => x.id === f.id);
+        if (u) f.status = u.status;
+      });
+      S.dmList.forEach(dm => {
+        const u = d.users.find(x => x.id === dm.user.id);
+        if (u) dm.user.status = u.status;
+      });
       refreshMembersIfOpen();
+      if (S.view === 'home' && !S.dmId && S.homeTab === 'friends') { $('messages').innerHTML = ''; renderFriendsView(); }
       break;
     case 'msgNew':
       cacheMsg(`${d.serverId}:${d.channelId}`, d.msg);
@@ -119,6 +128,7 @@ function handle(d) {
 /* ---------- Auth ---------- */
 $('btnLogin').onclick = () => auth('login');
 $('btnRegister').onclick = () => auth('register');
+$('authUser').onkeydown = e => { if (e.key === 'Enter') $('authPass').focus(); };
 $('authPass').onkeydown = e => { if (e.key === 'Enter') auth('login'); };
 
 function auth(mode) {
