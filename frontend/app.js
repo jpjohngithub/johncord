@@ -1,19 +1,39 @@
 /* ============ JohnCord - Cliente ============ */
 'use strict';
 
-function getBackendUrl() {
-  const saved = localStorage.getItem('johncord_backend');
-  if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
-  if (window.JOHNCORD_BACKEND && window.JOHNCORD_BACKEND.trim()) {
-    return window.JOHNCORD_BACKEND.trim().replace(/\/+$/, '');
-  }
-  // Se rodando em localhost em porta de dev (ex: 5500, 8080), aponta para o backend local porta 3000
+const DEFAULT_SERVERS = [
+  'https://johncord-backend.onrender.com',
+  'https://johncord.onrender.com',
+  'https://johncord-2-0.onrender.com'
+];
+
+let candidateIndex = 0;
+
+function getCandidateUrls() {
+  const custom = localStorage.getItem('johncord_backend');
+  const fromConfig = window.JOHNCORD_BACKEND;
+  const list = [];
+  if (custom && custom.trim()) list.push(custom.trim().replace(/\/+$/, ''));
+  if (fromConfig && fromConfig.trim()) list.push(fromConfig.trim().replace(/\/+$/, ''));
+  
   if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
     if (location.port && location.port !== '3000') {
-      return `${location.protocol}//${location.hostname}:3000`;
+      list.push(`${location.protocol}//${location.hostname}:3000`);
+    } else {
+      list.push(location.origin);
     }
   }
-  return '';
+
+  DEFAULT_SERVERS.forEach(url => {
+    if (!list.includes(url)) list.push(url);
+  });
+
+  return list;
+}
+
+function getBackendUrl() {
+  const candidates = getCandidateUrls();
+  return candidates[candidateIndex % candidates.length] || '';
 }
 
 function getWsUrl() {
@@ -56,6 +76,13 @@ function updateServerBadge(status, text) {
   if (txt) txt.textContent = text;
 }
 
+function triggerWakeUp(httpUrl) {
+  if (!httpUrl || !httpUrl.startsWith('http')) return;
+  try {
+    fetch(httpUrl, { mode: 'no-cors' }).catch(() => {});
+  } catch (e) {}
+}
+
 /* ---------- WebSocket ---------- */
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -65,17 +92,26 @@ function connect() {
   const targetWs = getWsUrl();
   const backendUrl = getBackendUrl();
   const displayHost = backendUrl ? backendUrl.replace(/^https?:\/\//, '') : location.host;
+  
   updateServerBadge('connecting', `Conectando em ${displayHost}...`);
+  triggerWakeUp(backendUrl);
 
   try {
     ws = new WebSocket(targetWs);
   } catch (err) {
-    updateServerBadge('error', 'Falha ao iniciar conexão');
-    scheduleReconnect();
+    updateServerBadge('connecting', 'Tentando conectar ao servidor...');
+    rotateCandidateAndRetry();
     return;
   }
 
+  const connTimeout = setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.CONNECTING) {
+      updateServerBadge('connecting', 'Acordando servidor na nuvem (Render)...');
+    }
+  }, 2500);
+
   ws.onopen = () => {
+    clearTimeout(connTimeout);
     updateServerBadge('connected', `Conectado: ${displayHost}`);
     if (lastAuth) send(lastAuth);
   };
@@ -89,19 +125,24 @@ function connect() {
   };
 
   ws.onerror = () => {
-    updateServerBadge('error', 'Servidor desconectado');
+    clearTimeout(connTimeout);
+    updateServerBadge('connecting', 'Tentando reconectar...');
   };
 
   ws.onclose = () => {
-    updateServerBadge('error', 'Servidor desconectado');
+    clearTimeout(connTimeout);
+    updateServerBadge('connecting', 'Reconectando ao servidor...');
     if (S.user) toast('Conexão perdida. Reconectando...');
-    scheduleReconnect();
+    rotateCandidateAndRetry();
   };
 }
 
-function scheduleReconnect() {
+function rotateCandidateAndRetry() {
   clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(connect, 2500);
+  reconnectTimer = setTimeout(() => {
+    candidateIndex++;
+    connect();
+  }, 2500);
 }
 
 function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
