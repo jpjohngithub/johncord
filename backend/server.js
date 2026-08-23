@@ -69,13 +69,31 @@ function getUserPublic(id) {
     status: byUser.has(id) ? 'online' : 'offline'
   };
 }
+function hasServerPerm(serverId, userId, perm) {
+  const srv = db.servers[serverId];
+  if (!srv) return false;
+  if (srv.owner === userId) return true;
+  const uRoles = (srv.memberRoles && srv.memberRoles[userId]) || [];
+  const roles = (srv.roles || []).filter(r => uRoles.includes(r.id));
+  if (roles.some(r => r.isAdmin)) return true;
+  if (perm && roles.some(r => r[perm])) return true;
+  return false;
+}
+
 function serversOf(userId) {
   return Object.values(db.servers)
     .filter(s => s.members.includes(userId))
     .map(s => ({
-      id: s.id, name: s.name, icon: s.icon, owner: s.owner,
-      permanent: !!s.permanent, inviteCode: s.inviteCode,
-      channels: s.channels
+      id: s.id,
+      name: s.name,
+      icon: s.icon,
+      banner: s.banner || '#5865f2',
+      owner: s.owner,
+      permanent: !!s.permanent,
+      inviteCode: s.inviteCode,
+      channels: s.channels,
+      roles: s.roles || [],
+      memberRoles: s.memberRoles || {}
     }));
 }
 function dmKey(a, b) { return [a, b].sort().join('|'); }
@@ -280,24 +298,165 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // ----- Servidores / grupos -----
+    // ----- Servidores / grupos & Cargos -----
     if (d.t === 'createServer') {
       const name = String(d.name || '').trim().slice(0, 30);
       if (name.length < 2) return send(ws, { t: 'err', error: 'Nome muito curto.' });
+      const icon = d.icon ? String(d.icon).slice(0, 100) : name[0].toUpperCase();
+      const banner = d.banner ? String(d.banner).slice(0, 50) : '#5865f2';
+      
+      const roleDono = {
+        id: uid(),
+        name: 'Dono 👑',
+        color: '#faa61a',
+        isAdmin: true,
+        manageChannels: true,
+        manageRoles: true,
+        kickMembers: true,
+        position: 1
+      };
+      const roleAdm = {
+        id: uid(),
+        name: 'Administrador 🛡️',
+        color: '#ed4245',
+        isAdmin: true,
+        manageChannels: true,
+        manageRoles: true,
+        kickMembers: true,
+        position: 2
+      };
+      const roleMember = {
+        id: uid(),
+        name: 'Membro ⭐',
+        color: '#5865f2',
+        isAdmin: false,
+        manageChannels: false,
+        manageRoles: false,
+        kickMembers: false,
+        position: 3
+      };
+
       const srv = {
-        id: uid(), name, icon: name[0].toUpperCase(),
-        owner: me.id, inviteCode: uid().slice(0, 8),
+        id: uid(),
+        name,
+        icon,
+        banner,
+        owner: me.id,
+        inviteCode: uid().slice(0, 8),
         members: [me.id],
-        channels: [{ id: uid(), name: 'geral', type: 'text', messages: [] }, { id: uid(), name: 'Geral', type: 'voice' }]
+        channels: [
+          { id: uid(), name: 'geral', type: 'text', messages: [] },
+          { id: uid(), name: 'Geral', type: 'voice' }
+        ],
+        roles: [roleDono, roleAdm, roleMember],
+        memberRoles: {
+          [me.id]: [roleDono.id]
+        }
       };
       db.servers[srv.id] = srv;
       save();
       sendTo(me.id, { t: 'servers', servers: serversOf(me.id), openServer: srv.id });
       return;
     }
+
+    if (d.t === 'updateServer') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageServer')) return;
+      if (d.name) srv.name = String(d.name).trim().slice(0, 30);
+      if (d.icon) srv.icon = String(d.icon).slice(0, 100);
+      if (d.banner) srv.banner = String(d.banner).slice(0, 50);
+      save();
+      pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'deleteServer') {
+      const srv = db.servers[d.serverId];
+      if (!srv || srv.permanent || srv.owner !== me.id) return;
+      const mems = [...srv.members];
+      delete db.servers[srv.id];
+      save();
+      mems.forEach(m => sendTo(m, { t: 'servers', servers: serversOf(m) }));
+      return;
+    }
+
+    // Cargos
+    if (d.t === 'createRole') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageRoles')) return;
+      const name = String(d.name || 'Novo Cargo').trim().slice(0, 25);
+      const color = String(d.color || '#5865f2').slice(0, 20);
+      if (!srv.roles) srv.roles = [];
+      const newRole = {
+        id: uid(),
+        name,
+        color,
+        isAdmin: !!d.isAdmin,
+        manageChannels: !!d.manageChannels,
+        manageRoles: !!d.manageRoles,
+        kickMembers: !!d.kickMembers,
+        position: srv.roles.length + 1
+      };
+      srv.roles.push(newRole);
+      save();
+      pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'updateRole') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageRoles')) return;
+      const role = (srv.roles || []).find(r => r.id === d.roleId);
+      if (!role) return;
+      if (d.name) role.name = String(d.name).trim().slice(0, 25);
+      if (d.color) role.color = String(d.color).slice(0, 20);
+      if (d.isAdmin !== undefined) role.isAdmin = !!d.isAdmin;
+      if (d.manageChannels !== undefined) role.manageChannels = !!d.manageChannels;
+      if (d.manageRoles !== undefined) role.manageRoles = !!d.manageRoles;
+      if (d.kickMembers !== undefined) role.kickMembers = !!d.kickMembers;
+      save();
+      pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'deleteRole') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageRoles')) return;
+      srv.roles = (srv.roles || []).filter(r => r.id !== d.roleId);
+      if (srv.memberRoles) {
+        for (const [uid2, rList] of Object.entries(srv.memberRoles)) {
+          srv.memberRoles[uid2] = rList.filter(rid => rid !== d.roleId);
+        }
+      }
+      save();
+      pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'setMemberRoles') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageRoles')) return;
+      if (!srv.memberRoles) srv.memberRoles = {};
+      srv.memberRoles[d.targetUserId] = Array.isArray(d.roleIds) ? d.roleIds : [];
+      save();
+      pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'kickMember') {
+      const srv = db.servers[d.serverId];
+      if (!srv || !hasServerPerm(srv.id, me.id, 'kickMembers') || d.targetUserId === srv.owner) return;
+      srv.members = srv.members.filter(m => m !== d.targetUserId);
+      if (srv.memberRoles) delete srv.memberRoles[d.targetUserId];
+      save();
+      sendTo(d.targetUserId, { t: 'servers', servers: serversOf(d.targetUserId) });
+      pushServerToMembers(srv);
+      return;
+    }
+
     if (d.t === 'createChannel') {
       const srv = db.servers[d.serverId];
-      if (!srv || srv.owner !== me.id) return;
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageChannels')) return;
       const name = String(d.name || '').trim().toLowerCase().replace(/[^a-z0-9áàâãéêíóôõúç\- ]/gi, '').slice(0, 25);
       if (!name) return;
       const type = d.type === 'voice' ? 'voice' : 'text';
@@ -309,7 +468,7 @@ wss.on('connection', (ws) => {
     }
     if (d.t === 'deleteChannel') {
       const srv = db.servers[d.serverId];
-      if (!srv || srv.owner !== me.id) return;
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageChannels')) return;
       srv.channels = srv.channels.filter(c => c.id !== d.channelId || c.id.startsWith('geral'));
       save();
       pushServerToMembers(srv);
@@ -319,22 +478,32 @@ wss.on('connection', (ws) => {
       const srv = db.servers[d.serverId];
       if (!srv || srv.permanent || srv.owner === me.id) return;
       srv.members = srv.members.filter(m => m !== me.id);
+      if (srv.memberRoles) delete srv.memberRoles[me.id];
       save();
       sendTo(me.id, { t: 'servers', servers: serversOf(me.id) });
+      pushServerToMembers(srv);
       return;
     }
     if (d.t === 'joinInvite') {
       const code = String(d.code || '').trim();
       const srv = Object.values(db.servers).find(s => s.inviteCode === code);
       if (!srv) return send(ws, { t: 'err', error: 'Convite inválido ou expirado.' });
-      if (!srv.members.includes(me.id)) { srv.members.push(me.id); save(); }
+      if (!srv.members.includes(me.id)) {
+        srv.members.push(me.id);
+        const memRole = (srv.roles || []).find(r => r.name.toLowerCase().includes('membro'));
+        if (memRole) {
+          if (!srv.memberRoles) srv.memberRoles = {};
+          srv.memberRoles[me.id] = [memRole.id];
+        }
+        save();
+      }
       pushServerToMembers(srv);
       sendTo(me.id, { t: 'servers', servers: serversOf(me.id), openServer: srv.id });
       return;
     }
     if (d.t === 'regenerateInvite') {
       const srv = db.servers[d.serverId];
-      if (!srv || srv.owner !== me.id) return;
+      if (!srv || !hasServerPerm(srv.id, me.id, 'manageServer')) return;
       srv.inviteCode = uid().slice(0, 8);
       save();
       sendTo(me.id, { t: 'inviteUpdated', serverId: srv.id, inviteCode: srv.inviteCode });
@@ -353,7 +522,17 @@ wss.on('connection', (ws) => {
     if (d.t === 'members') {
       const srv = db.servers[d.serverId];
       if (!srv || !srv.members.includes(me.id)) return;
-      send(ws, { t: 'members', serverId: srv.id, members: srv.members.map(getUserPublic).filter(Boolean) });
+      const mems = srv.members.map(mid => {
+        const pub = getUserPublic(mid);
+        if (!pub) return null;
+        const rIds = (srv.memberRoles && srv.memberRoles[mid]) || [];
+        const userRoles = (srv.roles || []).filter(r => rIds.includes(r.id));
+        return {
+          ...pub,
+          roles: userRoles
+        };
+      }).filter(Boolean);
+      send(ws, { t: 'members', serverId: srv.id, members: mems, roles: srv.roles || [], memberRoles: srv.memberRoles || {} });
       return;
     }
     if (d.t === 'dmHistory') {

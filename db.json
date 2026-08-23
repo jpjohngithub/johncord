@@ -5,6 +5,7 @@
       "id": "geral",
       "name": "JohnCord",
       "icon": "J",
+      "banner": "#5865f2",
       "owner": null,
       "permanent": true,
       "inviteCode": null,
@@ -21,7 +22,30 @@
           "name": "Geral",
           "type": "voice"
         }
-      ]
+      ],
+      "roles": [
+        {
+          "id": "r-admin",
+          "name": "Administrador 🛡️",
+          "color": "#ed4245",
+          "isAdmin": true,
+          "manageChannels": true,
+          "manageRoles": true,
+          "kickMembers": true,
+          "position": 1
+        },
+        {
+          "id": "r-member",
+          "name": "Membro ⭐",
+          "color": "#5865f2",
+          "isAdmin": false,
+          "manageChannels": false,
+          "manageRoles": false,
+          "kickMembers": false,
+          "position": 2
+        }
+      ],
+      "memberRoles": {}
     }
   },
   "dms": {},

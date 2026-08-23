@@ -598,6 +598,22 @@ function openUserProfileModal(userId) {
   const bioText = u.bio || 'Este usuário ainda não escreveu nada sobre ele.';
   const statusText = u.customStatus || (u.status === 'online' ? '🟢 Online' : '⚪ Offline');
 
+  const srv = currentServer();
+  let rolesHtml = '';
+  if (srv && S.view !== 'home') {
+    const mRoleIds = (srv.memberRoles && srv.memberRoles[userId]) || (u.roles ? u.roles.map(r => r.id) : []);
+    const userRoles = (srv.roles || []).filter(r => mRoleIds.includes(r.id));
+    if (userRoles.length) {
+      rolesHtml = `
+        <div class="profile-card-divider"></div>
+        <div class="profile-section-label">Cargos em ${esc(srv.name)}</div>
+        <div class="member-roles-chips" style="margin-top:4px">
+          ${userRoles.map(r => `<span class="role-chip" style="background:${r.color}">${esc(r.name)}</span>`).join('')}
+        </div>
+      `;
+    }
+  }
+
   openModal(`
     <div class="profile-card-box">
       <div class="profile-card-banner" style="background:${bannerColor}"></div>
@@ -616,6 +632,7 @@ function openUserProfileModal(userId) {
         <div class="profile-status-badge">
           <span>${esc(statusText)}</span>
         </div>
+        ${rolesHtml}
         <div class="profile-card-divider"></div>
         <div class="profile-section-label">Sobre Mim</div>
         <div class="profile-bio-text">${esc(bioText)}</div>
@@ -698,18 +715,29 @@ function renderSidebar() {
 
   const srv = currentServer();
   if (!srv) return;
-  header.textContent = srv.name;
+
+  header.className = 'sidebar-header' + (!srv.permanent ? ' has-menu' : '');
+  header.innerHTML = `<span>${esc(srv.name)}</span>` + (!srv.permanent ? `<span class="sidebar-header-arrow">⚙️ ▼</span>` : '');
+  if (!srv.permanent) {
+    header.onclick = () => modalServerManage(srv.id);
+    header.title = "Configurações do Servidor";
+  } else {
+    header.onclick = null;
+    header.title = "";
+  }
+
+  const canManageChans = userHasPerm(srv, S.user?.id, 'manageChannels');
 
   let sec = document.createElement('div');
   sec.className = 'sidebar-section';
   sec.innerHTML = `<span>Canais de texto</span>` +
-    (srv.owner === S.user.id ? `<button title="Criar canal de texto">＋</button>` : '');
+    (canManageChans ? `<button title="Criar canal de texto">＋</button>` : '');
   if (sec.querySelector('button')) sec.querySelector('button').onclick = () => modalCreateChannel('text');
   body.appendChild(sec);
   srv.channels.filter(c => c.type === 'text').forEach(ch => {
     const item = document.createElement('div');
     item.className = 'chan-item' + (S.channelId === ch.id ? ' active' : '');
-    const del = srv.owner === S.user.id && !ch.id.startsWith('geral')
+    const del = canManageChans && !ch.id.startsWith('geral')
       ? `<span class="chan-del" title="Excluir">✕</span>` : '';
     item.innerHTML = `<span class="chan-hash">#</span><span>${esc(ch.name)}</span>${del}`;
     item.onclick = e => {
@@ -725,7 +753,7 @@ function renderSidebar() {
   sec = document.createElement('div');
   sec.className = 'sidebar-section';
   sec.innerHTML = `<span>Canais de voz</span>` +
-    (srv.owner === S.user.id ? `<button title="Criar canal de voz">＋</button>` : '');
+    (canManageChans ? `<button title="Criar canal de voz">＋</button>` : '');
   if (sec.querySelector('button')) sec.querySelector('button').onclick = () => modalCreateChannel('voice');
   body.appendChild(sec);
   srv.channels.filter(c => c.type === 'voice').forEach(ch => {
@@ -828,6 +856,18 @@ function appendMsg(m) {
   const tagHtml = m.username && m.displayName && m.displayName !== m.username ? `<span style="font-size:11px;color:var(--text-dim);margin-left:4px;font-weight:normal">@${esc(m.username)}</span>` : '';
   const avContent = m.avatar || (disp || m.username || '?')[0].toUpperCase();
 
+  const srv = currentServer();
+  let authorColor = m.color || '#5865f2';
+  let roleBadge = '';
+  if (srv && S.view !== 'home') {
+    const mRoleIds = (srv.memberRoles && srv.memberRoles[m.userId]) || [];
+    const roles = (srv.roles || []).filter(r => mRoleIds.includes(r.id));
+    if (roles.length > 0) {
+      authorColor = roles[0].color;
+      roleBadge = `<span class="role-badge" style="background:${roles[0].color}">${esc(roles[0].name)}</span>`;
+    }
+  }
+
   if (!grouped) {
     const g = document.createElement('div');
     g.className = 'msg-group';
@@ -843,7 +883,7 @@ function appendMsg(m) {
     content.className = 'msg-content';
     content.innerHTML = `
       <div class="msg-header">
-        <span class="msg-author" style="color:${m.color || '#5865f2'};cursor:pointer" title="Ver perfil">${esc(disp)}</span>${tagHtml}
+        <span class="msg-author" style="color:${authorColor};cursor:pointer" title="Ver perfil">${esc(disp)}</span>${tagHtml}${roleBadge}
         <span class="msg-time">${fmtTime(m.ts)}</span>
       </div>
       <div class="msg-text">${mdLite(m.content)}</div>`;
@@ -880,22 +920,70 @@ function refreshMembersIfOpen() {
 function renderMemberList() {
   const ml = $('memberList');
   ml.innerHTML = '';
-  const onlineU = S.members.filter(m => m.status === 'online');
-  const offlineU = S.members.filter(m => m.status === 'offline');
-  if (onlineU.length) {
-    const c = document.createElement('div');
-    c.className = 'member-cat'; c.textContent = `Online — ${onlineU.length}`;
-    ml.appendChild(c);
-    onlineU.forEach(m => ml.appendChild(memberItem(m)));
-  }
-  if (offlineU.length) {
-    const c = document.createElement('div');
-    c.className = 'member-cat'; c.textContent = `Offline — ${offlineU.length}`;
-    ml.appendChild(c);
-    offlineU.forEach(m => ml.appendChild(memberItem(m)));
+  const srv = currentServer();
+  if (!srv || S.view === 'home') return;
+
+  const roles = srv.roles || [];
+  const memberRoles = srv.memberRoles || {};
+
+  if (roles.length > 0) {
+    const assignedMembers = new Set();
+
+    roles.forEach(role => {
+      const membersInRole = S.members.filter(m => {
+        const uRoles = memberRoles[m.id] || (m.roles ? m.roles.map(r => r.id) : []);
+        return uRoles.includes(role.id) && m.status === 'online' && !assignedMembers.has(m.id);
+      });
+
+      if (membersInRole.length) {
+        const c = document.createElement('div');
+        c.className = 'member-cat';
+        c.style.color = role.color;
+        c.textContent = `${role.name.toUpperCase()} — ${membersInRole.length}`;
+        ml.appendChild(c);
+        membersInRole.forEach(m => {
+          assignedMembers.add(m.id);
+          ml.appendChild(memberItem(m, role));
+        });
+      }
+    });
+
+    const otherOnline = S.members.filter(m => m.status === 'online' && !assignedMembers.has(m.id));
+    if (otherOnline.length) {
+      const c = document.createElement('div');
+      c.className = 'member-cat';
+      c.textContent = `ONLINE — ${otherOnline.length}`;
+      ml.appendChild(c);
+      otherOnline.forEach(m => ml.appendChild(memberItem(m)));
+    }
+
+    const offlineU = S.members.filter(m => m.status === 'offline');
+    if (offlineU.length) {
+      const c = document.createElement('div');
+      c.className = 'member-cat';
+      c.textContent = `OFFLINE — ${offlineU.length}`;
+      ml.appendChild(c);
+      offlineU.forEach(m => ml.appendChild(memberItem(m)));
+    }
+  } else {
+    const onlineU = S.members.filter(m => m.status === 'online');
+    const offlineU = S.members.filter(m => m.status === 'offline');
+    if (onlineU.length) {
+      const c = document.createElement('div');
+      c.className = 'member-cat'; c.textContent = `Online — ${onlineU.length}`;
+      ml.appendChild(c);
+      onlineU.forEach(m => ml.appendChild(memberItem(m)));
+    }
+    if (offlineU.length) {
+      const c = document.createElement('div');
+      c.className = 'member-cat'; c.textContent = `Offline — ${offlineU.length}`;
+      ml.appendChild(c);
+      offlineU.forEach(m => ml.appendChild(memberItem(m)));
+    }
   }
 }
-function memberItem(m) {
+
+function memberItem(m, topRole) {
   const div = document.createElement('div');
   div.className = 'member-item' + (m.status === 'offline' ? ' offline' : '') + ' clickable';
   const av = document.createElement('div');
@@ -907,8 +995,10 @@ function memberItem(m) {
   const info = document.createElement('div');
   info.className = 'member-info';
   const disp = m.displayName || m.username;
+  const nameColor = topRole ? topRole.color : (m.color || 'var(--text)');
   const custom = m.customStatus ? `<small style="color:#00a8fc;font-size:10px;display:block">${esc(m.customStatus)}</small>` : '';
-  info.innerHTML = `<span style="font-weight:600">${esc(disp)}</span>${custom}`;
+  const roleBadgeHtml = topRole ? `<span class="role-badge" style="background:${topRole.color}">${esc(topRole.name)}</span>` : '';
+  info.innerHTML = `<div><span style="font-weight:600;color:${nameColor}">${esc(disp)}</span>${roleBadgeHtml}</div>${custom}`;
   div.appendChild(av); div.appendChild(info);
   div.onclick = () => openUserProfileModal(m.id);
   return div;
@@ -1018,18 +1108,84 @@ function openModal(html) {
 function closeModal() { $('modalOverlay').style.display = 'none'; }
 $('modalOverlay').onclick = e => { if (e.target === $('modalOverlay')) closeModal(); };
 
+function userHasPerm(srv, userId, perm) {
+  if (!srv || !userId) return false;
+  if (srv.owner === userId) return true;
+  const uRoles = (srv.memberRoles && srv.memberRoles[userId]) || [];
+  const roles = (srv.roles || []).filter(r => uRoles.includes(r.id));
+  if (roles.some(r => r.isAdmin)) return true;
+  if (perm && roles.some(r => r[perm])) return true;
+  return false;
+}
+
 $('btnAddServer').onclick = () => {
+  const emojis = ['🎮', '🏰', '🚀', '💎', '👑', '🔥', '⚡', '⚔️', '👾', '🎯', '🎧', '☕', '🌟', '🛡️'];
+  const colors = ['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#00a8fc', '#9b59b6', '#202225', '#111214'];
+  let selectedIcon = '🎮';
+  let selectedBanner = '#5865f2';
+
   openModal(`
-    <h2>Crie seu servidor</h2>
-    <p>Seu servidor é onde você conversa com seus amigos. Crie um e convide quem quiser com um link!</p>
-    <input class="input" id="mSrvName" placeholder="Nome do servidor" maxlength="30">
+    <h2>🏰 Criar Servidor</h2>
+    <p>Crie um espaço personalizado para você e seus amigos conversarem, transmitirem e jogarem juntos!</p>
+    
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:10px">
+      <div id="mPrevSrvIcon" style="width:52px;height:52px;border-radius:14px;background:#2b2d31;font-size:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.3)">
+        🎮
+      </div>
+      <div>
+        <div id="mPrevSrvName" style="font-weight:800;font-size:17px;color:var(--header)">Meu Servidor</div>
+        <div style="font-size:12px;color:var(--text-dim)">Comunidade Personalizada</div>
+      </div>
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO SERVIDOR:</label>
+    <input class="input" id="mSrvName" placeholder="Ex: Clube dos Gamers" maxlength="30" value="Meu Servidor">
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">ÍCONE / FOTO DO SERVIDOR:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px" id="srvEmojiPicker">
+      ${emojis.map(em => `<button class="emoji-opt-btn" data-emoji="${em}" style="font-size:18px;background:#2b2d31;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">${em}</button>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO BANNER DO SERVIDOR:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px" id="srvBannerPicker">
+      ${colors.map(c => `<div class="color-dot${c === selectedBanner ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c === selectedBanner ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+    </div>
+
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="joinByCodeModal()">Já tenho um convite</button>
-      <button class="btn btn-primary" id="mCreate">Criar</button>
-    </div>`);
+      <button class="btn btn-ghost" onclick="joinByCodeModal()">Entrar com Convite</button>
+      <button class="btn btn-primary" id="mCreate">Criar Servidor</button>
+    </div>
+  `);
+
+  const prevIcon = $('mPrevSrvIcon');
+  const prevName = $('mPrevSrvName');
+
+  $('mSrvName').oninput = e => {
+    prevName.textContent = e.target.value || 'Meu Servidor';
+  };
+
+  document.querySelectorAll('#srvEmojiPicker .emoji-opt-btn').forEach(btn => {
+    btn.onclick = () => {
+      selectedIcon = btn.dataset.emoji;
+      prevIcon.textContent = selectedIcon;
+    };
+  });
+
+  document.querySelectorAll('#srvBannerPicker .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      selectedBanner = dot.dataset.color;
+      document.querySelectorAll('#srvBannerPicker .color-dot').forEach(d => d.style.borderColor = 'transparent');
+      dot.style.borderColor = '#fff';
+    };
+  });
+
   $('mCreate').onclick = () => {
     const name = $('mSrvName').value.trim();
-    if (name.length >= 2) { send({ t: 'createServer', name }); closeModal(); }
+    if (name.length >= 2) {
+      send({ t: 'createServer', name, icon: selectedIcon, banner: selectedBanner });
+      closeModal();
+      toast('Servidor criado com sucesso!');
+    }
   };
   $('mSrvName').focus();
 };
@@ -1049,25 +1205,392 @@ window.joinByCodeModal = function () {
   };
 };
 
+function modalServerManage(serverId, initialTab = 'overview') {
+  const srv = S.servers.find(s => s.id === serverId);
+  if (!srv) return;
+  const isOwner = srv.owner === S.user?.id;
+  const canManageServer = userHasPerm(srv, S.user?.id, 'manageServer');
+  const canManageRoles = userHasPerm(srv, S.user?.id, 'manageRoles');
+  const canKick = userHasPerm(srv, S.user?.id, 'kickMembers');
+
+  const bannerColor = srv.banner || '#5865f2';
+  const icon = srv.icon || '🎮';
+  const roles = srv.roles || [];
+  const memberRoles = srv.memberRoles || {};
+  const inviteUrl = `${location.origin}/?join=${srv.inviteCode || ''}`;
+
+  let activeTab = initialTab;
+
+  function renderContent() {
+    let tabHtml = `
+      <div class="srv-tabs">
+        <button class="srv-tab-btn${activeTab === 'overview' ? ' active' : ''}" data-tab="overview">📁 Visão Geral</button>
+        <button class="srv-tab-btn${activeTab === 'roles' ? ' active' : ''}" data-tab="roles">🛡️ Cargos (${roles.length})</button>
+        <button class="srv-tab-btn${activeTab === 'members' ? ' active' : ''}" data-tab="members">👥 Membros (${srv.members ? srv.members.length : 0})</button>
+        <button class="srv-tab-btn${activeTab === 'invite' ? ' active' : ''}" data-tab="invite">🔗 Convite</button>
+      </div>
+    `;
+
+    let bodyHtml = '';
+
+    if (activeTab === 'overview') {
+      bodyHtml = `
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:10px">
+          <div style="width:50px;height:50px;border-radius:12px;background:#2b2d31;font-size:26px;display:flex;align-items:center;justify-content:center">
+            ${icon}
+          </div>
+          <div>
+            <div style="font-weight:800;font-size:17px;color:var(--header)">${esc(srv.name)}</div>
+            <div style="font-size:12px;color:var(--text-dim)">Dono: ${isOwner ? 'Você 👑' : 'Outro Membro'}</div>
+          </div>
+        </div>
+
+        ${canManageServer ? `
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO SERVIDOR:</label>
+          <input class="input" id="smSrvName" value="${esc(srv.name)}" maxlength="30">
+
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">ÍCONE / EMOJI:</label>
+          <input class="input" id="smSrvIcon" value="${esc(icon)}" maxlength="10">
+
+          <div class="modal-actions" style="margin-top:14px">
+            ${isOwner ? `<button class="btn btn-danger" id="smBtnDeleteSrv">🗑️ Excluir Servidor</button>` : ''}
+            <button class="btn btn-primary" id="smBtnSaveOverview">Salvar Alterações</button>
+          </div>
+        ` : `
+          <p style="color:var(--text-dim)">Você está visualizando as informações deste servidor.</p>
+          <div class="modal-actions">
+            <button class="btn btn-danger" id="smBtnLeaveSrv">🚪 Sair do Servidor</button>
+            <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+          </div>
+        `}
+      `;
+    } else if (activeTab === 'roles') {
+      bodyHtml = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:13px;color:var(--text-dim)">Use cargos para organizar membros e definir administradores.</span>
+          ${canManageRoles ? `<button class="btn btn-primary btn-small" id="smBtnNewRole">+ Criar Cargo</button>` : ''}
+        </div>
+
+        <div style="max-height:280px;overflow-y:auto">
+          ${roles.map(r => `
+            <div class="role-item-card" style="border-left-color:${r.color}">
+              <div>
+                <span style="font-weight:700;font-size:14px;color:${r.color}">${esc(r.name)}</span>
+                <div style="font-size:11px;color:var(--text-dim)">${r.isAdmin ? '👑 Administrador Completo' : (r.manageChannels ? '📁 Gerencia Canais' : 'Membro Regular')}</div>
+              </div>
+              ${canManageRoles ? `
+                <div style="display:flex;gap:6px">
+                  <button class="btn btn-ghost btn-small sm-edit-role" data-rid="${r.id}">✏️ Editar</button>
+                  <button class="btn btn-danger btn-small sm-del-role" data-rid="${r.id}">🗑️</button>
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (activeTab === 'members') {
+      bodyHtml = `
+        <div style="margin-bottom:12px;font-size:13px;color:var(--text-dim)">Gerencie os membros do servidor e seus respectivos cargos.</div>
+        <div style="max-height:300px;overflow-y:auto">
+          ${(S.members || []).map(m => {
+            const mRoleIds = memberRoles[m.id] || (m.roles ? m.roles.map(r => r.id) : []);
+            const userRoles = roles.filter(r => mRoleIds.includes(r.id));
+            const isTargetOwner = srv.owner === m.id;
+
+            return `
+              <div class="member-admin-row">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div class="user-avatar" style="width:32px;height:32px;background:${m.color || '#5865f2'}">${m.avatar || (m.displayName || m.username || '?')[0].toUpperCase()}</div>
+                  <div>
+                    <div style="font-weight:700;font-size:13.5px;color:var(--header)">${esc(m.displayName || m.username)} ${isTargetOwner ? '👑' : ''}</div>
+                    <div class="member-roles-chips">
+                      ${userRoles.map(r => `<span class="role-chip" style="background:${r.color}">${esc(r.name)}</span>`).join('')}
+                      ${!userRoles.length ? `<span style="font-size:11px;color:var(--text-dim)">Sem cargo</span>` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px">
+                  ${canManageRoles ? `<button class="btn btn-ghost btn-small sm-assign-role" data-uid="${m.id}">+ Cargo</button>` : ''}
+                  ${canKick && !isTargetOwner && m.id !== S.user?.id ? `<button class="btn btn-danger btn-small sm-kick-user" data-uid="${m.id}" title="Expulsar">👢</button>` : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    } else if (activeTab === 'invite') {
+      bodyHtml = `
+        <p>Compartilhe este convite para chamar amigos para <strong>${esc(srv.name)}</strong>:</p>
+        <div class="invite-link" id="smInviteBox">${inviteUrl}</div>
+        <div class="modal-actions">
+          ${canManageServer ? `<button class="btn btn-ghost" id="smBtnRegen">🔄 Gerar Novo Convite</button>` : ''}
+          <button class="btn btn-primary" id="smBtnCopy">📋 Copiar Link</button>
+        </div>
+      `;
+    }
+
+    openModal(`
+      <h2>⚙️ Configurações de ${esc(srv.name)}</h2>
+      ${tabHtml}
+      ${bodyHtml}
+    `);
+
+    // Tab switcher
+    document.querySelectorAll('.srv-tab-btn').forEach(btn => {
+      btn.onclick = () => {
+        activeTab = btn.dataset.tab;
+        renderContent();
+      };
+    });
+
+    // Overview actions
+    if ($('smBtnSaveOverview')) {
+      $('smBtnSaveOverview').onclick = () => {
+        const newName = $('smSrvName').value.trim();
+        const newIcon = $('smSrvIcon').value.trim() || srv.name[0].toUpperCase();
+        send({ t: 'updateServer', serverId: srv.id, name: newName, icon: newIcon });
+        closeModal();
+        toast('Servidor atualizado!');
+      };
+    }
+    if ($('smBtnDeleteSrv')) {
+      $('smBtnDeleteSrv').onclick = () => {
+        if (confirm(`Tem certeza absoluta que deseja excluir o servidor "${srv.name}"? Esta ação não pode ser desfeita!`)) {
+          send({ t: 'deleteServer', serverId: srv.id });
+          closeModal();
+          openHome();
+          toast('Servidor excluído.');
+        }
+      };
+    }
+    if ($('smBtnLeaveSrv')) {
+      $('smBtnLeaveSrv').onclick = () => {
+        if (confirm(`Deseja sair de ${srv.name}?`)) {
+          send({ t: 'leaveServer', serverId: srv.id });
+          closeModal();
+          openHome();
+          toast('Você saiu do servidor.');
+        }
+      };
+    }
+
+    // Role actions
+    if ($('smBtnNewRole')) {
+      $('smBtnNewRole').onclick = () => modalCreateRole(srv.id);
+    }
+    document.querySelectorAll('.sm-edit-role').forEach(b => {
+      b.onclick = () => modalEditRole(srv.id, b.dataset.rid);
+    });
+    document.querySelectorAll('.sm-del-role').forEach(b => {
+      b.onclick = () => {
+        if (confirm('Excluir este cargo?')) {
+          send({ t: 'deleteRole', serverId: srv.id, roleId: b.dataset.rid });
+          setTimeout(() => modalServerManage(srv.id, 'roles'), 200);
+        }
+      };
+    });
+
+    // Member actions
+    document.querySelectorAll('.sm-assign-role').forEach(b => {
+      b.onclick = () => modalAssignRoles(srv.id, b.dataset.uid);
+    });
+    document.querySelectorAll('.sm-kick-user').forEach(b => {
+      b.onclick = () => {
+        if (confirm('Expulsar este membro do servidor?')) {
+          send({ t: 'kickMember', serverId: srv.id, targetUserId: b.dataset.uid });
+          setTimeout(() => modalServerManage(srv.id, 'members'), 200);
+          toast('Membro expulso.');
+        }
+      };
+    });
+
+    // Invite actions
+    if ($('smBtnCopy')) {
+      $('smBtnCopy').onclick = () => {
+        navigator.clipboard.writeText(inviteUrl).then(() => toast('Link copiado!')).catch(() => {});
+      };
+    }
+    if ($('smBtnRegen')) {
+      $('smBtnRegen').onclick = () => {
+        send({ t: 'regenerateInvite', serverId: srv.id });
+        setTimeout(() => modalServerManage(srv.id, 'invite'), 200);
+        toast('Novo convite gerado!');
+      };
+    }
+  }
+
+  renderContent();
+}
+
+function modalCreateRole(serverId) {
+  const roleColors = ['#ed4245', '#faa61a', '#3ba55c', '#5865f2', '#eb459e', '#00a8fc', '#9b59b6', '#2ecc71', '#e67e22'];
+  let selectedColor = '#5865f2';
+
+  openModal(`
+    <h2>🛡️ Criar Novo Cargo</h2>
+    <p>Configure o nome, cor e permissões do cargo:</p>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO CARGO:</label>
+    <input class="input" id="rcName" placeholder="Ex: Moderador 🛡️" maxlength="25">
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO CARGO:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="roleColorPicker">
+      ${roleColors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:8px">PERMISSÕES DO CARGO:</label>
+    <div style="background:#1e1f22;padding:8px 12px;border-radius:8px;margin-bottom:16px">
+      <div class="perm-row">
+        <label><input type="checkbox" id="permAdmin"> 👑 <strong>Administrador</strong> (Acesso Total)</label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="permManageChans"> 📁 <strong>Gerenciar Canais</strong> (Criar/Excluir)</label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="permManageRoles"> 🛡️ <strong>Gerenciar Cargos</strong> (Dar cargos)</label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="permKick"> 👢 <strong>Expulsar Membros</strong></label>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="modalServerManage('${serverId}', 'roles')">Voltar</button>
+      <button class="btn btn-primary" id="rcBtnSave">Salvar Cargo</button>
+    </div>
+  `);
+
+  document.querySelectorAll('#roleColorPicker .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      selectedColor = dot.dataset.color;
+      document.querySelectorAll('#roleColorPicker .color-dot').forEach(d => d.style.borderColor = 'transparent');
+      dot.style.borderColor = '#fff';
+    };
+  });
+
+  $('rcBtnSave').onclick = () => {
+    const name = $('rcName').value.trim();
+    if (!name) return;
+    send({
+      t: 'createRole',
+      serverId,
+      name,
+      color: selectedColor,
+      isAdmin: $('permAdmin').checked,
+      manageChannels: $('permManageChans').checked,
+      manageRoles: $('permManageRoles').checked,
+      kickMembers: $('permKick').checked
+    });
+    setTimeout(() => modalServerManage(serverId, 'roles'), 200);
+    toast('Cargo criado!');
+  };
+}
+
+function modalEditRole(serverId, roleId) {
+  const srv = S.servers.find(s => s.id === serverId);
+  const role = srv?.roles?.find(r => r.id === roleId);
+  if (!role) return;
+  const roleColors = ['#ed4245', '#faa61a', '#3ba55c', '#5865f2', '#eb459e', '#00a8fc', '#9b59b6', '#2ecc71', '#e67e22'];
+  let selectedColor = role.color || '#5865f2';
+
+  openModal(`
+    <h2>✏️ Editar Cargo: ${esc(role.name)}</h2>
+    
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO CARGO:</label>
+    <input class="input" id="reName" value="${esc(role.name)}" maxlength="25">
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO CARGO:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="roleColorPicker">
+      ${roleColors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:8px">PERMISSÕES DO CARGO:</label>
+    <div style="background:#1e1f22;padding:8px 12px;border-radius:8px;margin-bottom:16px">
+      <div class="perm-row">
+        <label><input type="checkbox" id="reAdmin" ${role.isAdmin ? 'checked' : ''}> 👑 <strong>Administrador</strong></label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="reManageChans" ${role.manageChannels ? 'checked' : ''}> 📁 <strong>Gerenciar Canais</strong></label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="reManageRoles" ${role.manageRoles ? 'checked' : ''}> 🛡️ <strong>Gerenciar Cargos</strong></label>
+      </div>
+      <div class="perm-row">
+        <label><input type="checkbox" id="reKick" ${role.kickMembers ? 'checked' : ''}> 👢 <strong>Expulsar Membros</strong></label>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="modalServerManage('${serverId}', 'roles')">Voltar</button>
+      <button class="btn btn-primary" id="reBtnSave">Salvar Alterações</button>
+    </div>
+  `);
+
+  document.querySelectorAll('#roleColorPicker .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      selectedColor = dot.dataset.color;
+      document.querySelectorAll('#roleColorPicker .color-dot').forEach(d => d.style.borderColor = 'transparent');
+      dot.style.borderColor = '#fff';
+    };
+  });
+
+  $('reBtnSave').onclick = () => {
+    const name = $('reName').value.trim();
+    if (!name) return;
+    send({
+      t: 'updateRole',
+      serverId,
+      roleId: role.id,
+      name,
+      color: selectedColor,
+      isAdmin: $('reAdmin').checked,
+      manageChannels: $('reManageChans').checked,
+      manageRoles: $('reManageRoles').checked,
+      kickMembers: $('reKick').checked
+    });
+    setTimeout(() => modalServerManage(serverId, 'roles'), 200);
+    toast('Cargo atualizado!');
+  };
+}
+
+function modalAssignRoles(serverId, targetUserId) {
+  const srv = S.servers.find(s => s.id === serverId);
+  const roles = srv?.roles || [];
+  const memberRoles = (srv?.memberRoles && srv.memberRoles[targetUserId]) || [];
+  const member = (S.members || []).find(m => m.id === targetUserId) || { username: 'Membro' };
+
+  openModal(`
+    <h2>🛡️ Atribuir Cargos para ${esc(member.displayName || member.username)}</h2>
+    <p>Selecione os cargos para este usuário:</p>
+    
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;max-height:260px;overflow-y:auto">
+      ${roles.map(r => `
+        <label style="display:flex;align-items:center;gap:10px;background:#1e1f22;padding:10px 12px;border-radius:8px;cursor:pointer">
+          <input type="checkbox" class="mar-cb" data-rid="${r.id}" ${memberRoles.includes(r.id) ? 'checked' : ''}>
+          <span style="font-weight:700;color:${r.color}">${esc(r.name)}</span>
+        </label>
+      `).join('')}
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="modalServerManage('${serverId}', 'members')">Voltar</button>
+      <button class="btn btn-primary" id="marBtnSave">Salvar Cargos</button>
+    </div>
+  `);
+
+  $('marBtnSave').onclick = () => {
+    const selected = [];
+    document.querySelectorAll('.mar-cb:checked').forEach(cb => selected.push(cb.dataset.rid));
+    send({ t: 'setMemberRoles', serverId, targetUserId, roleIds: selected });
+    setTimeout(() => modalServerManage(serverId, 'members'), 200);
+    toast('Cargos atribuídos com sucesso!');
+  };
+}
+
 $('btnInvite').onclick = () => {
   const srv = currentServer();
   if (!srv || srv.permanent) return;
-  const url = `${location.origin}/?join=${srv.inviteCode}`;
-  openModal(`
-    <h2>Convidar pessoas para ${esc(srv.name)}</h2>
-    <p>Envie este link para qualquer pessoa. Quem clicar entra automaticamente!</p>
-    <div class="invite-link">${url}</div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="mRegen">🔄 Gerar novo link</button>
-      <button class="btn btn-primary" id="mCopy">📋 Copiar link</button>
-    </div>`);
-  $('mCopy').onclick = () => {
-    navigator.clipboard.writeText(url).then(() => toast('Link copiado!')).catch(() => {});
-  };
-  $('mRegen').onclick = () => {
-    send({ t: 'regenerateInvite', serverId: srv.id });
-    closeModal();
-  };
+  modalServerManage(srv.id, 'invite');
 };
 
 function modalCreateChannel(type) {
