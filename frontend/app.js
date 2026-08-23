@@ -63,6 +63,9 @@ const S = {
   voice: null,             // {serverId, channelId}
   voiceStates: {},
   muted: false,
+  deafened: false,
+  screenSharing: false,
+  userVolumes: {},
   lastAuthor: null,
   lastTs: 0,
 };
@@ -228,6 +231,7 @@ function handle(d) {
     case 'voiceState':
       S.voiceStates = d.states;
       renderSidebar();
+      renderVoiceStage();
       syncVoicePeers();
       break;
     case 'voicePeers':
@@ -436,8 +440,18 @@ function renderSidebar() {
       wrap.className = 'voice-users';
       users.forEach(u => {
         const vu = document.createElement('div');
-        vu.className = 'voice-user' + (u.muted ? ' muted' : '');
-        vu.innerHTML = `<span class="dot"></span><span>${esc(u.username)}</span>`;
+        const isMuted = u.muted;
+        const isDeaf = u.deafened;
+        const isLive = u.screenSharing;
+        vu.className = 'voice-user' + (isMuted ? ' muted' : '') + (isDeaf ? ' deafened' : '');
+        const liveBadge = isLive ? `<span class="badge-live">AO VIVO</span>` : '';
+        const stateIcon = isDeaf ? '🎧' : (isMuted ? '🔇' : '');
+        const isMe = S.user && u.id === S.user.id;
+        const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume">🔊</button>` : '';
+
+        vu.innerHTML = `<span class="dot"></span><span class="vu-name">${esc(u.username)}</span><span class="vu-actions">${liveBadge}${stateIcon}${volBtn}</span>`;
+        const b = vu.querySelector('.vu-btn');
+        if (b) b.onclick = e => { e.stopPropagation(); openVolumeModal(u.id, u.username); };
         wrap.appendChild(vu);
       });
       body.appendChild(wrap);
@@ -761,6 +775,7 @@ $('btnMembers').onclick = () => {
   ml.style.display = ml.style.display === 'none' ? '' : 'none';
 };
 $('btnMute').onclick = toggleMute;
+if ($('btnDeafen')) $('btnDeafen').onclick = toggleDeafen;
 $('btnDisconnectVoice').onclick = leaveVoice;
 if ($('btnSettings')) $('btnSettings').onclick = modalServerSettings;
 
@@ -798,8 +813,58 @@ function modalServerSettings() {
   $('mBackendUrl').focus();
 }
 
-/* ---------- Voz / WebRTC ---------- */
+/* ---------- Controle de Volume Individual ---------- */
+function getUserVolume(userId) {
+  if (S.userVolumes[userId] !== undefined) return S.userVolumes[userId];
+  const saved = localStorage.getItem('jc_vol_' + userId);
+  const val = saved !== null ? Number(saved) : 100;
+  S.userVolumes[userId] = val;
+  return val;
+}
+
+function setUserVolume(userId, vol) {
+  const val = Math.max(0, Math.min(200, Number(vol)));
+  S.userVolumes[userId] = val;
+  localStorage.setItem('jc_vol_' + userId, String(val));
+  const audio = document.getElementById('audio-' + userId);
+  if (audio) audio.volume = S.deafened ? 0 : Math.min(1, val / 100);
+  const video = document.getElementById('video-' + userId);
+  if (video) video.volume = S.deafened ? 0 : Math.min(1, val / 100);
+  renderVoiceStage();
+}
+
+function openVolumeModal(userId, username) {
+  const current = getUserVolume(userId);
+  openModal(`
+    <h2>🔊 Volume do Usuário</h2>
+    <p>Ajuste o volume individual de <strong>${esc(username)}</strong> na call:</p>
+    <div class="volume-slider-box">
+      <div class="volume-slider-header">
+        <span>Volume de Usuário</span>
+        <span id="volValText" style="color:var(--blurple)">${current}%</span>
+      </div>
+      <input type="range" class="volume-slider" id="volRange" min="0" max="200" value="${current}">
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" id="mResetVol">Resetar (100%)</button>
+      <button class="btn btn-primary" onclick="closeModal()">Pronto</button>
+    </div>
+  `);
+  $('volRange').oninput = e => {
+    const val = e.target.value;
+    $('volValText').textContent = val + '%';
+    setUserVolume(userId, val);
+  };
+  $('mResetVol').onclick = () => {
+    $('volRange').value = 100;
+    $('volValText').textContent = '100%';
+    setUserVolume(userId, 100);
+  };
+}
+
+/* ---------- Voz / WebRTC / Compartilhamento de Tela ---------- */
 let localStream = null;
+let screenStream = null;
 const peers = {};   // userId -> RTCPeerConnection
 
 async function joinVoice(serverId, channelId) {
@@ -807,7 +872,11 @@ async function joinVoice(serverId, channelId) {
     if (!localStream) localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     S.voice = { serverId, channelId };
     S.muted = false;
+    S.deafened = false;
+    S.screenSharing = false;
+    updateVoiceButtons();
     updateVoiceBar(serverId, channelId);
+    renderVoiceStage();
     send({ t: 'voiceJoin', serverId, channelId });
   } catch (e) {
     toast('⚠ Microfone bloqueado! Permita o acesso ao microfone no navegador.');
@@ -815,19 +884,119 @@ async function joinVoice(serverId, channelId) {
 }
 
 function leaveVoice() {
+  stopScreenShare(false);
   Object.values(peers).forEach(pc => pc.close());
   for (const k of Object.keys(peers)) delete peers[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (S.voice) { send({ t: 'voiceLeave' }); S.voice = null; }
+  S.muted = false;
+  S.deafened = false;
+  S.screenSharing = false;
+  updateVoiceButtons();
   updateVoiceBar(null);
+  renderVoiceStage();
 }
 
 function toggleMute() {
+  if (S.deafened) {
+    toggleDeafen();
+    return;
+  }
   S.muted = !S.muted;
   if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
   send({ t: 'voiceMute', muted: S.muted });
-  $('btnMute').textContent = S.muted ? '🔇' : '🎤';
+  updateVoiceButtons();
   updateVoiceBar(S.voice ? S.voice.serverId : null, S.voice ? S.voice.channelId : null);
+  renderVoiceStage();
+}
+
+function toggleDeafen() {
+  S.deafened = !S.deafened;
+  if (S.deafened) {
+    S.muted = true;
+    if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = false);
+    document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.muted = true);
+    toast('🔇 Ensurdecido: áudio geral silenciado.');
+  } else {
+    document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => {
+      el.muted = false;
+      const uid = el.id.replace(/^(audio|video)-/, '');
+      const vol = getUserVolume(uid);
+      el.volume = Math.min(1, vol / 100);
+    });
+    toast('🎧 Áudio ativado.');
+  }
+  send({ t: 'voiceDeafen', deafened: S.deafened });
+  send({ t: 'voiceMute', muted: S.muted });
+  updateVoiceButtons();
+  updateVoiceBar(S.voice ? S.voice.serverId : null, S.voice ? S.voice.channelId : null);
+  renderVoiceStage();
+}
+
+function updateVoiceButtons() {
+  const btnMute = $('btnMute');
+  const btnDeafen = $('btnDeafen');
+  if (btnMute) {
+    btnMute.textContent = S.muted ? '🔇' : '🎤';
+    btnMute.classList.toggle('active-red', S.muted);
+  }
+  if (btnDeafen) {
+    btnDeafen.textContent = S.deafened ? '🔇🎧' : '🎧';
+    btnDeafen.classList.toggle('active-red', S.deafened);
+  }
+}
+
+async function toggleScreenShare() {
+  if (!S.voice) {
+    toast('Entre em um canal de voz para compartilhar sua tela!');
+    return;
+  }
+  if (S.screenSharing) {
+    stopScreenShare(true);
+    return;
+  }
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { cursor: 'always' },
+      audio: true
+    });
+    S.screenSharing = true;
+    send({ t: 'voiceScreen', screenSharing: true });
+
+    for (const [pid, pc] of Object.entries(peers)) {
+      screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+      createOffer(pc, pid);
+    }
+
+    screenStream.getVideoTracks()[0].onended = () => {
+      stopScreenShare(true);
+    };
+
+    updateVoiceBar(S.voice.serverId, S.voice.channelId);
+    renderVoiceStage();
+    toast('🖥️ Compartilhamento de tela iniciado!');
+  } catch (err) {
+    if (err.name !== 'NotAllowedError') {
+      toast('⚠ Não foi possível iniciar o compartilhamento de tela.');
+    }
+  }
+}
+
+function stopScreenShare(notify = true) {
+  if (screenStream) {
+    screenStream.getTracks().forEach(t => t.stop());
+    screenStream = null;
+  }
+  if (S.screenSharing) {
+    S.screenSharing = false;
+    if (notify) send({ t: 'voiceScreen', screenSharing: false });
+    for (const [pid, pc] of Object.entries(peers)) {
+      createOffer(pc, pid);
+    }
+    if (S.voice) updateVoiceBar(S.voice.serverId, S.voice.channelId);
+    renderVoiceStage();
+    toast('🛑 Compartilhamento de tela finalizado.');
+  }
 }
 
 function updateVoiceBar(serverId, channelId) {
@@ -836,17 +1005,118 @@ function updateVoiceBar(serverId, channelId) {
   $('btnDisconnectVoice').style.display = S.voice ? '' : 'none';
   if (!S.voice) return;
   const srv = S.servers.find(s => s.id === serverId);
+  const ch = srv && srv.channels.find(c => c.id === channelId);
   const bar = document.createElement('div');
   bar.className = 'call-bar';
   bar.innerHTML = `
-    <div class="call-info">🔊 Conectado — ${esc(srv ? srv.name : '')} / ${esc(channelId || '')}</div>
+    <div class="call-info">🔊 Conectado — ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
     <div class="call-btns">
-      <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${S.muted ? '🔇 Mudo' : '🎙 Falando'}</button>
-      <button class="call-btn danger" id="cbLeave">📞 Desconectar</button>
+      <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${S.muted ? '🔇 Mudo' : '🎙️ Falando'}</button>
+      <button class="call-btn${S.deafened ? ' on' : ''}" id="cbDeafen">${S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Ouvindo'}</button>
+      <button class="call-btn${S.screenSharing ? ' live' : ''}" id="cbScreen">${S.screenSharing ? '🛑 Parar Tela' : '🖥️ Tela'}</button>
+      <button class="call-btn danger" id="cbLeave">📞 Sair</button>
     </div>`;
   $('userPanel').parentNode.insertBefore(bar, $('userPanel'));
   $('cbMute').onclick = toggleMute;
+  $('cbDeafen').onclick = toggleDeafen;
+  $('cbScreen').onclick = toggleScreenShare;
   $('cbLeave').onclick = leaveVoice;
+}
+
+function renderVoiceStage() {
+  const stage = $('voiceStage');
+  if (!stage) return;
+  if (!S.voice) {
+    stage.style.display = 'none';
+    stage.innerHTML = '';
+    return;
+  }
+  stage.style.display = 'flex';
+  const srv = S.servers.find(s => s.id === S.voice.serverId);
+  const ch = srv && srv.channels.find(c => c.id === S.voice.channelId);
+  const users = ((S.voiceStates[S.voice.serverId] || {})[S.voice.channelId]) || [];
+
+  let html = `
+    <div class="stage-header">
+      <span>🔊 ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : 'Call')} (${users.length} participante${users.length === 1 ? '' : 's'})</span>
+      <button class="btn btn-small btn-primary" id="btnStageScreen">${S.screenSharing ? '🛑 Parar Transmissão' : '🖥️ Compartilhar Tela'}</button>
+    </div>
+    <div class="stage-grid" id="stageGrid"></div>
+  `;
+  stage.innerHTML = html;
+  $('btnStageScreen').onclick = toggleScreenShare;
+  const grid = $('stageGrid');
+
+  // Tile do próprio usuário
+  const myTile = document.createElement('div');
+  myTile.className = 'stage-tile';
+  if (S.screenSharing && screenStream) {
+    const v = document.createElement('video');
+    v.autoplay = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.srcObject = screenStream;
+    myTile.appendChild(v);
+  } else {
+    myTile.innerHTML = `
+      <div class="stage-tile-avatar">
+        <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${(S.user?.username || '?')[0].toUpperCase()}</div>
+      </div>
+    `;
+  }
+  const myOverlay = document.createElement('div');
+  myOverlay.className = 'stage-tile-overlay';
+  myOverlay.innerHTML = `
+    <span>${esc(S.user?.username || 'Você')} (Você)${S.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+    <span>${S.deafened ? '🎧🔇' : (S.muted ? '🔇' : '🎙️')}</span>
+  `;
+  myTile.appendChild(myOverlay);
+  grid.appendChild(myTile);
+
+  // Tiles dos outros usuários
+  users.filter(u => u.id !== S.user?.id).forEach(u => {
+    const tile = document.createElement('div');
+    tile.className = 'stage-tile';
+    const remoteVid = document.getElementById('video-' + u.id);
+
+    if (u.screenSharing && remoteVid && remoteVid.srcObject) {
+      const v = document.createElement('video');
+      v.autoplay = true;
+      v.playsInline = true;
+      v.srcObject = remoteVid.srcObject;
+      tile.appendChild(v);
+    } else {
+      tile.innerHTML = `
+        <div class="stage-tile-avatar">
+          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${(u.username || '?')[0].toUpperCase()}</div>
+        </div>
+      `;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'stage-tile-overlay';
+    overlay.innerHTML = `
+      <span>${esc(u.username)}${u.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
+        <button class="fullscreen-btn btn-vol-adj" title="Volume">🔊 ${getUserVolume(u.id)}%</button>
+        ${u.screenSharing ? `<button class="fullscreen-btn btn-fs" title="Tela Cheia">⛶</button>` : ''}
+      </div>
+    `;
+    const volBtn = overlay.querySelector('.btn-vol-adj');
+    if (volBtn) volBtn.onclick = () => openVolumeModal(u.id, u.username);
+
+    const fsBtn = overlay.querySelector('.btn-fs');
+    if (fsBtn) {
+      fsBtn.onclick = () => {
+        const vid = tile.querySelector('video');
+        if (vid && vid.requestFullscreen) vid.requestFullscreen();
+      };
+    }
+
+    tile.appendChild(overlay);
+    grid.appendChild(tile);
+  });
 }
 
 function getPeer(peerId, initiator) {
@@ -854,20 +1124,41 @@ function getPeer(peerId, initiator) {
   const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   peers[peerId] = pc;
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+  
   pc.onicecandidate = e => {
     if (e.candidate) send({ t: 'signal', to: peerId, data: { type: 'candidate', candidate: e.candidate } });
   };
+  
   pc.ontrack = e => {
-    let audio = document.getElementById('audio-' + peerId);
-    if (!audio) {
-      audio = document.createElement('audio');
-      audio.id = 'audio-' + peerId;
-      audio.autoplay = true;
-      audio.className = 'remote-audio';
-      document.body.appendChild(audio);
+    if (e.track.kind === 'video') {
+      let video = document.getElementById('video-' + peerId);
+      if (!video) {
+        video = document.createElement('video');
+        video.id = 'video-' + peerId;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.className = 'remote-video';
+        video.style.display = 'none';
+        document.body.appendChild(video);
+      }
+      video.srcObject = e.streams[0];
+      renderVoiceStage();
+    } else {
+      let audio = document.getElementById('audio-' + peerId);
+      if (!audio) {
+        audio = document.createElement('audio');
+        audio.id = 'audio-' + peerId;
+        audio.autoplay = true;
+        audio.className = 'remote-audio';
+        document.body.appendChild(audio);
+      }
+      audio.srcObject = e.streams[0];
+      audio.muted = S.deafened;
+      audio.volume = S.deafened ? 0 : Math.min(1, getUserVolume(peerId) / 100);
     }
-    audio.srcObject = e.streams[0];
   };
+  
   if (initiator) createOffer(pc, peerId);
   return pc;
 }
@@ -883,15 +1174,22 @@ async function createOffer(pc, peerId) {
 function syncVoicePeers() {
   if (!S.voice) return;
   const inChan = (((S.voiceStates[S.voice.serverId] || {})[S.voice.channelId]) || [])
-    .map(u => u.id).filter(id => id !== S.user.id);
-  // remover peers que saíram
+    .map(u => u.id).filter(id => id !== S.user?.id);
+  
   for (const pid of Object.keys(peers)) {
-    if (!inChan.includes(pid)) { peers[pid].close(); delete peers[pid]; const a = document.getElementById('audio-' + pid); if (a) a.remove(); }
+    if (!inChan.includes(pid)) {
+      peers[pid].close();
+      delete peers[pid];
+      const a = document.getElementById('audio-' + pid);
+      if (a) a.remove();
+      const v = document.getElementById('video-' + pid);
+      if (v) v.remove();
+    }
   }
-  // criar conexões determinísticas (maior id inicia)
   inChan.forEach(pid => {
-    if (!peers[pid] && S.user.id > pid) getPeer(pid, true);
+    if (!peers[pid] && S.user?.id > pid) getPeer(pid, true);
   });
+  renderVoiceStage();
 }
 
 async function handleSignal(from, data) {

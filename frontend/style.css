@@ -318,10 +318,165 @@ input, textarea { font-family: inherit; }
   border-bottom: 1px solid rgba(0,0,0,.3);
 }
 .call-bar .call-info { font-size: 13px; color: var(--green); font-weight: 700; margin-bottom: 6px; }
-.call-bar .call-btns { display: flex; gap: 8px; }
-.call-btn { flex: 1; padding: 8px; border-radius: 5px; background: #2b2d31; font-size: 13px; font-weight: 600; color: var(--text); }
+.call-bar .call-btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.call-btn { padding: 7px 8px; border-radius: 5px; background: #2b2d31; font-size: 12px; font-weight: 600; color: var(--text); display: flex; align-items: center; justify-content: center; gap: 4px; transition: .15s; }
+.call-btn:hover { background: #35373c; }
 .call-btn.danger { background: var(--red); color: #fff; }
+.call-btn.danger:hover { background: #d83a3d; }
 .call-btn.on { background: var(--red); color: #fff; }
+.call-btn.live { background: #5865f2; color: #fff; }
+
+/* Voice User na Sidebar */
+.voice-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 13.5px;
+}
+.voice-user:hover { background: var(--bg-hover); }
+.voice-user .vu-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-user .vu-actions { display: flex; align-items: center; gap: 4px; }
+.voice-user .vu-btn {
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: rgba(255,255,255,.05);
+  cursor: pointer;
+}
+.voice-user .vu-btn:hover { background: rgba(255,255,255,.15); color: #fff; }
+.voice-user.speaking .dot { background: var(--green); box-shadow: 0 0 8px rgba(59,165,92,.8); }
+.voice-user.muted .dot { background: var(--red); }
+.voice-user.deafened .dot { background: #747f8d; }
+
+.badge-live {
+  background: #ed4245;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+/* Palco de Voz e Compartilhamento de Tela */
+.voice-stage {
+  background: #1e1f22;
+  border-bottom: 2px solid #2b2d31;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--header);
+}
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+.stage-tile {
+  background: #2b2d31;
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  border: 2px solid transparent;
+  transition: border-color .2s;
+}
+.stage-tile.speaking { border-color: var(--green); }
+.stage-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.stage-tile-overlay {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0,0,0,.6);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+.stage-tile-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.stage-tile-avatar .user-avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 28px;
+  border: 3px solid transparent;
+  transition: border-color .2s;
+}
+.stage-tile.speaking .stage-tile-avatar .user-avatar {
+  border-color: var(--green);
+  box-shadow: 0 0 16px rgba(59,165,92,.6);
+}
+
+.fullscreen-btn {
+  background: rgba(255,255,255,.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: #fff;
+  cursor: pointer;
+}
+.fullscreen-btn:hover { background: var(--blurple); }
+
+/* Volume Slider */
+.volume-slider-box {
+  background: #111214;
+  padding: 14px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.6);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 200px;
+}
+.volume-slider-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--header);
+}
+.volume-slider {
+  width: 100%;
+  accent-color: var(--blurple);
+  cursor: pointer;
+}
+
+.icon-btn.active-red {
+  color: #fff;
+  background: var(--red);
+  border-radius: 4px;
+}
 
 /* Modal */
 .modal-overlay {

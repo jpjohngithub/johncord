@@ -51,7 +51,8 @@
         <span id="myName">...</span>
         <small id="myStatus">#0000</small>
       </div>
-      <button id="btnMute" title="Silenciar microfone" class="icon-btn">🎤</button>
+      <button id="btnMute" title="Silenciar microfone (Mute)" class="icon-btn">🎤</button>
+      <button id="btnDeafen" title="Ensurdecer / Mute Geral (Deafen)" class="icon-btn">🎧</button>
       <button id="btnDisconnectVoice" title="Desconectar da call" class="icon-btn" style="display:none">📞</button>
       <button id="btnSettings" title="Configurações / Servidor" class="icon-btn">⚙️</button>
     </div>
@@ -69,6 +70,7 @@
     </header>
     <div class="main-body">
       <div class="chat-wrap">
+        <div id="voiceStage" class="voice-stage" style="display:none"></div>
         <div id="messages" class="messages"></div>
         <div id="typingIndicator" class="typing-indicator"></div>
         <div class="composer-wrap">

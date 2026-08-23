@@ -91,7 +91,12 @@ function broadcastVoiceStates(serverId) {
     if (!byUser.has(uid2)) continue;
     if (!states[v.serverId]) states[v.serverId] = {};
     if (!states[v.serverId][v.channelId]) states[v.serverId][v.channelId] = [];
-    states[v.serverId][v.channelId].push({ ...getUserPublic(uid2), muted: !!v.muted });
+    states[v.serverId][v.channelId].push({
+      ...getUserPublic(uid2),
+      muted: !!v.muted,
+      deafened: !!v.deafened,
+      screenSharing: !!v.screenSharing
+    });
   }
   for (const ws of online.keys()) send(ws, { t: 'voiceState', states });
 }
@@ -340,6 +345,20 @@ wss.on('connection', (ws) => {
     if (d.t === 'voiceMute') {
       const v = voice.get(me.id);
       if (v) { v.muted = !!d.muted; broadcastVoiceStates(); }
+      return;
+    }
+    if (d.t === 'voiceDeafen') {
+      const v = voice.get(me.id);
+      if (v) {
+        v.deafened = !!d.deafened;
+        if (v.deafened) v.muted = true;
+        broadcastVoiceStates();
+      }
+      return;
+    }
+    if (d.t === 'voiceScreen') {
+      const v = voice.get(me.id);
+      if (v) { v.screenSharing = !!d.screenSharing; broadcastVoiceStates(); }
       return;
     }
     if (d.t === 'voiceLeave') {
