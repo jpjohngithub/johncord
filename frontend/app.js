@@ -1,12 +1,32 @@
 /* ============ JohnCord - Cliente ============ */
 'use strict';
 
-const BACKEND = window.JOHNCORD_BACKEND || '';
-const wsUrl = BACKEND
-  ? BACKEND.replace(/^http/, 'ws')
-  : (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-let ws;
+function getBackendUrl() {
+  const saved = localStorage.getItem('johncord_backend');
+  if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
+  if (window.JOHNCORD_BACKEND && window.JOHNCORD_BACKEND.trim()) {
+    return window.JOHNCORD_BACKEND.trim().replace(/\/+$/, '');
+  }
+  // Se rodando em localhost em porta de dev (ex: 5500, 8080), aponta para o backend local porta 3000
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    if (location.port && location.port !== '3000') {
+      return `${location.protocol}//${location.hostname}:3000`;
+    }
+  }
+  return '';
+}
+
+function getWsUrl() {
+  const backend = getBackendUrl();
+  if (backend) {
+    return backend.replace(/^http/, 'ws');
+  }
+  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+}
+
+let ws = null;
 let lastAuth = null;
+let reconnectTimer = null;
 
 const S = {
   user: null,
@@ -29,14 +49,62 @@ const S = {
 
 const $ = id => document.getElementById(id);
 
+function updateServerBadge(status, text) {
+  const dot = $('statusDot');
+  const txt = $('statusText');
+  if (dot) dot.className = 'dot-indicator ' + status;
+  if (txt) txt.textContent = text;
+}
+
 /* ---------- WebSocket ---------- */
 function connect() {
-  ws = new WebSocket(wsUrl);
-  ws.onopen = () => { if (lastAuth) send(lastAuth); };
-  ws.onmessage = e => handle(JSON.parse(e.data));
-  ws.onclose = () => { if (S.user) { toast('Conexão perdida. Reconectando...'); setTimeout(connect, 1500); } };
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  clearTimeout(reconnectTimer);
+  const targetWs = getWsUrl();
+  const backendUrl = getBackendUrl();
+  const displayHost = backendUrl ? backendUrl.replace(/^https?:\/\//, '') : location.host;
+  updateServerBadge('connecting', `Conectando em ${displayHost}...`);
+
+  try {
+    ws = new WebSocket(targetWs);
+  } catch (err) {
+    updateServerBadge('error', 'Falha ao iniciar conexão');
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    updateServerBadge('connected', `Conectado: ${displayHost}`);
+    if (lastAuth) send(lastAuth);
+  };
+
+  ws.onmessage = e => {
+    try {
+      handle(JSON.parse(e.data));
+    } catch (err) {
+      console.error('Erro ao processar mensagem:', err);
+    }
+  };
+
+  ws.onerror = () => {
+    updateServerBadge('error', 'Servidor desconectado');
+  };
+
+  ws.onclose = () => {
+    updateServerBadge('error', 'Servidor desconectado');
+    if (S.user) toast('Conexão perdida. Reconectando...');
+    scheduleReconnect();
+  };
 }
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, 2500);
+}
+
+function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
 
 function handle(d) {
   switch (d.t) {
@@ -133,10 +201,28 @@ $('btnLogin').onclick = () => auth('login');
 $('btnRegister').onclick = () => auth('register');
 $('authUser').onkeydown = e => { if (e.key === 'Enter') $('authPass').focus(); };
 $('authPass').onkeydown = e => { if (e.key === 'Enter') auth('login'); };
+if ($('btnConfigServer')) $('btnConfigServer').onclick = modalServerSettings;
 
 function auth(mode) {
   hideAuthError();
-  lastAuth = { t: mode, username: $('authUser').value.trim(), password: $('authPass').value };
+  const user = $('authUser').value.trim();
+  const pass = $('authPass').value;
+  if (!user || !pass) {
+    showAuthError('Informe o nome de usuário e a senha.');
+    return;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    const isRemote = !location.hostname.includes('localhost') && !location.hostname.includes('127.0.0.1');
+    if (isRemote && !getBackendUrl()) {
+      showAuthError('Servidor não conectado! Configure a URL do backend nas configurações.');
+      modalServerSettings();
+      return;
+    }
+    showAuthError('Conectando ao servidor... Aguarde alguns instantes e tente novamente.');
+    connect();
+    return;
+  }
+  lastAuth = { t: mode, username: user, password: pass };
   send(lastAuth);
 }
 function showAuthError(m) { $('authError').textContent = m; $('authError').style.display = 'block'; }
@@ -635,6 +721,41 @@ $('btnMembers').onclick = () => {
 };
 $('btnMute').onclick = toggleMute;
 $('btnDisconnectVoice').onclick = leaveVoice;
+if ($('btnSettings')) $('btnSettings').onclick = modalServerSettings;
+
+function modalServerSettings() {
+  const current = getBackendUrl() || '';
+  openModal(`
+    <h2>⚙️ Configuração do Servidor</h2>
+    <p>Para o site funcionar hospedado na <strong>Netlify</strong>, informe a URL do backend hospedado no <strong>Render</strong> (ou outro servidor Node.js).</p>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;font-weight:600">URL DO BACKEND (HTTP / HTTPS):</label>
+      <input class="input" id="mBackendUrl" placeholder="https://johncord-backend.onrender.com" value="${esc(current)}">
+    </div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.4">
+      💡 <em>Dica:</em> Se estiver rodando o servidor e o site juntos (localmente), deixe o campo vazio.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="mSaveBackend">Salvar e Conectar</button>
+    </div>`);
+
+  $('mSaveBackend').onclick = () => {
+    const val = $('mBackendUrl').value.trim();
+    if (val) {
+      localStorage.setItem('johncord_backend', val);
+    } else {
+      localStorage.removeItem('johncord_backend');
+    }
+    closeModal();
+    toast('Configuração salva! Reconectando...');
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+    }
+    connect();
+  };
+  $('mBackendUrl').focus();
+}
 
 /* ---------- Voz / WebRTC ---------- */
 let localStream = null;

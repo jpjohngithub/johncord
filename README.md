@@ -42,14 +42,16 @@ Para amigos acessarem na mesma rede, use seu IP local (ex: `http://192.168.x.x:3
 3. Copie a URL gerada (ex: `https://johncord-backend.onrender.com`)
 
 ### 2. Frontend na Netlify
-1. A Netlify já está vinculada ao repositório e publica a pasta `frontend/`
-2. Edite `frontend/config.js` e coloque a URL do backend:
-   ```js
-   window.JOHNCORD_BACKEND = 'https://johncord-backend.onrender.com';
-   ```
-3. Pronto! O site conecta no servidor automaticamente.
+1. A Netlify está vinculada ao repositório GitHub e publica automaticamente a pasta `frontend/` (configurada via `netlify.toml`).
+2. Para conectar o site ao backend:
+   - **Pela própria interface do site:** Na tela de login ou dentro do app, clique em **⚙️ Configurar** e insira a URL do backend (ex: `https://johncord-backend.onrender.com`). Fica salvo automaticamente no seu navegador!
+   - **Ou no código:** Edite `frontend/config.js` e defina:
+     ```js
+     window.JOHNCORD_BACKEND = 'https://johncord-backend.onrender.com';
+     ```
+3. Pronto! O site conecta no servidor automaticamente com chat e chamada de voz.
 
-> 💡 Alternativa: o backend também serve o site sozinho. Se hospedar apenas o Render, deixe `JOHNCORD_BACKEND = ''`.
+> 💡 **Dica:** O backend no Render também serve o frontend diretamente. Se você abrir a URL do Render no navegador, o JohnCord funciona completo por padrão.
 
 ## 🧪 Testes
 

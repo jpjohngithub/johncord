@@ -15,6 +15,11 @@
     <div class="auth-logo">🎮 JohnCord</div>
     <div class="auth-sub">Converse e faça call com seus amigos</div>
     <div id="authError" class="auth-error" style="display:none"></div>
+    <div class="auth-server-badge" id="authServerBadge">
+      <span class="dot-indicator" id="statusDot"></span>
+      <span id="statusText">Conectando ao servidor...</span>
+      <button id="btnConfigServer" class="server-change-btn" type="button">⚙️ Configurar</button>
+    </div>
     <input id="authUser" class="input" placeholder="Nome de usuário" maxlength="20" autocomplete="username">
     <input id="authPass" type="password" class="input" placeholder="Senha" autocomplete="current-password">
     <button id="btnLogin" class="btn btn-primary">Entrar</button>
@@ -48,6 +53,7 @@
       </div>
       <button id="btnMute" title="Silenciar microfone" class="icon-btn">🎤</button>
       <button id="btnDisconnectVoice" title="Desconectar da call" class="icon-btn" style="display:none">📞</button>
+      <button id="btnSettings" title="Configurações / Servidor" class="icon-btn">⚙️</button>
     </div>
   </aside>
 
