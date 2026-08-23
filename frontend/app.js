@@ -235,7 +235,7 @@ function handle(d) {
       syncVoicePeers();
       break;
     case 'voicePeers':
-      d.peers.forEach(pid => getPeer(pid, true));
+      // Iniciacao e feita deterministicamente em syncVoicePeers (evita conflito de oferta)
       break;
     case 'voiceSpeaking':
       updateSpeakingUI(d.userId, d.speaking);
@@ -884,8 +884,14 @@ function renderMessages() {
   box.innerHTML = '';
   S.lastAuthor = null;
   const key = `${S.view}:${S.channelId}`;
-  (S.channelCache[key] || []).forEach(m => appendMsg(m));
-  scrollBottom();
+  const msgs = S.channelCache[key] || [];
+  // Renderizacao em lote com DocumentFragment (1 unico reflow - muito mais rapido)
+  const frag = document.createDocumentFragment();
+  msgTarget = frag;
+  for (const m of msgs) appendMsg(m, { noScroll: true });
+  msgTarget = null;
+  box.appendChild(frag);
+  scrollToBottomForce();
 }
 
 function renderDmMessages() {
@@ -893,8 +899,13 @@ function renderDmMessages() {
   box.innerHTML = '';
   S.lastAuthor = null;
   const dm = S.dms[S.dmId];
-  (dm && dm.messages || []).forEach(appendMsg);
-  scrollBottom();
+  const msgs = (dm && dm.messages) || [];
+  const frag = document.createDocumentFragment();
+  msgTarget = frag;
+  for (const m of msgs) appendMsg(m, { noScroll: true });
+  msgTarget = null;
+  box.appendChild(frag);
+  scrollToBottomForce();
 }
 
 function fmtTime(ts) {
@@ -902,14 +913,18 @@ function fmtTime(ts) {
   return `Hoje às ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 }
 
-function appendMsg(m) {
-  const box = $('messages');
+let msgTarget = null; // alvo de renderizacao em lote (fragment)
+
+function appendMsg(m, opts = {}) {
+  const box = msgTarget || $('messages');
+  // So rola automaticamente se o usuario ja estiver perto do fim (nao interrompe a leitura)
+  const nearBottom = isNearBottom();
   if (m.system) {
     const div = document.createElement('div');
     div.className = 'msg-system';
     div.innerHTML = mdLite(m.content);
     box.appendChild(div);
-    scrollBottom();
+    if (!opts.noScroll && nearBottom) queueScroll();
     return;
   }
   const grouped = m.userId === S.lastAuthor && (m.ts - S.lastTs) < 5 * 60 * 1000;
@@ -960,13 +975,30 @@ function appendMsg(m) {
       last.appendChild(t);
     }
   }
-  scrollBottom();
+  if (!opts.noScroll && nearBottom) queueScroll();
 }
 
-function scrollBottom() {
+let scrollQueued = false;
+function isNearBottom() {
   const box = $('messages');
-  box.scrollTop = box.scrollHeight;
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 220;
 }
+function queueScroll() {
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => {
+    scrollQueued = false;
+    $('messages').scrollTop = $('messages').scrollHeight;
+  });
+}
+function scrollToBottomForce() {
+  requestAnimationFrame(() => {
+    const box = $('messages');
+    box.scrollTop = box.scrollHeight;
+  });
+}
+// Compat: rolagem forcada
+function scrollBottom() { scrollToBottomForce(); }
 
 function cacheMsg(key, msg) {
   if (!S.channelCache[key]) S.channelCache[key] = [];
@@ -2521,14 +2553,38 @@ function getPeer(peerId, initiator) {
 
   const pc = new RTCPeerConnection({
     iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' }
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      // Servidores TURN gratuitos - obrigatorios para conectar redes diferentes
+      {
+        urls: [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:80?transport=tcp',
+          'turn:openrelay.metered.ca:443',
+          'turns:openrelay.metered.ca:443?transport=tcp'
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:turn.anyfirewall.com:443?transport=tcp',
+        username: 'webrtc',
+        credential: 'webrtc'
+      }
     ]
   });
   peers[peerId] = pc;
+
+  // Reconexao automatica se a conexao falhar
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') {
+      try { pc.close(); } catch (e) {}
+      delete peers[peerId];
+      delete pendingCandidates[peerId];
+      setTimeout(() => {
+        if (S.voice && !peers[peerId]) getPeer(peerId, S.user.id > peerId);
+      }, 1500);
+    }
+  };
   
   if (localStream) {
     localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
@@ -2621,7 +2677,7 @@ function syncVoicePeers() {
   if (!S.voice) return;
   const inChan = (((S.voiceStates[S.voice.serverId] || {})[S.voice.channelId]) || [])
     .map(u => u.id).filter(id => id !== S.user?.id);
-  
+
   for (const pid of Object.keys(peers)) {
     if (!inChan.includes(pid)) {
       peers[pid].close();
@@ -2634,6 +2690,10 @@ function syncVoicePeers() {
       if (S.spotlightUser === pid) S.spotlightUser = null;
     }
   }
+  // Criacao deterministica: apenas o maior id inicia a oferta (evita glare)
+  inChan.forEach(pid => {
+    if (!peers[pid] && S.user.id > pid) getPeer(pid, true);
+  });
   renderVoiceRoom();
 }
 
@@ -2700,5 +2760,28 @@ $('msgInput').addEventListener('input', function () {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 160) + 'px';
 });
+
+/* ---------- Navegacao mobile (gavetas) ---------- */
+function closeDrawers() { document.body.classList.remove('rail-open', 'sidebar-open'); }
+$('mobileMenu').onclick = e => {
+  e.stopPropagation();
+  document.body.classList.toggle('sidebar-open');
+};
+$('drawerBackdrop').onclick = closeDrawers;
+document.addEventListener('click', e => {
+  if (!document.body.classList.contains('sidebar-open') && !document.body.classList.contains('rail-open')) return;
+  // primeiro toque abre o rail de servidores, segundo fecha
+  if (e.target.closest('.rail') || e.target.closest('.sidebar')) return;
+  closeDrawers();
+});
+// abrir canal pelo mobile ja fecha as gavetas
+const origOpenChannel = openChannel;
+openChannel = function (chId) { origOpenChannel(chId); closeDrawers(); };
+const origOpenServerFn = openServer;
+openServer = function (id) { origOpenServerFn(id); closeDrawers(); };
+const origOpenDmFn = openDm;
+openDm = function (dmId) { origOpenDmFn(dmId); closeDrawers(); };
+const origOpenHomeFn = openHome;
+openHome = function () { origOpenHomeFn(); closeDrawers(); };
 
 connect();

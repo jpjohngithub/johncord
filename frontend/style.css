@@ -1113,3 +1113,93 @@ audio.remote-audio {
   width: 1px;
   height: 1px;
 }
+
+/* ============ RESPONSIVIDADE MOBILE ============ */
+.rail, .sidebar, .member-list { transition: transform .22s ease; }
+
+@media (max-width: 900px) {
+  .member-list { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  body { font-size: 14px; }
+
+  /* Rail de servidores vira gaveta lateral esquerda */
+  .rail {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    z-index: 60;
+    transform: translateX(-100%);
+    box-shadow: 6px 0 24px rgba(0,0,0,.5);
+  }
+  body.rail-open .rail { transform: translateX(0); }
+
+  /* Sidebar de canais tambem e gaveta */
+  .sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    z-index: 55;
+    transform: translateX(-100%);
+    width: 280px;
+    max-width: 82vw;
+    box-shadow: 6px 0 24px rgba(0,0,0,.5);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); }
+  body.rail-open .sidebar { transform: translateX(72px); }
+
+  .app { height: 100%; }
+  .main { width: 100%; }
+
+  /* Botoes hamburger para abrir as gavetas */
+  .mobile-toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-size: 19px;
+    flex-shrink: 0;
+  }
+  .mobile-toggle:hover { background: var(--bg-hover); color: var(--text); }
+  .header-actions { gap: 5px; }
+
+  /* Fecha gavetas ao tocar fora */
+  .drawer-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 50;
+  }
+  body.rail-open .drawer-backdrop,
+  body.sidebar-open .drawer-backdrop { display: block; }
+
+  /* Mensagens mais compactas */
+  .msg-group { padding: 3px 10px; gap: 9px; }
+  .msg-group .m-avatar { width: 32px; height: 32px; font-size: 13px; }
+  .msg-text { font-size: 14.5px; }
+  .composer-wrap { padding: 0 8px 12px; }
+  #msgInput { font-size: 16px; } /* evita zoom automatico no iOS */
+
+  .main-header { padding: 0 10px; }
+  .main-header #chanName { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .btn-small { padding: 4px 8px; font-size: 12px; }
+
+  /* Modal ocupa melhor o espaco */
+  .modal { padding: 18px; border-radius: 12px; }
+  .auth-box { padding: 26px 20px; }
+
+  /* Call: controles maiores para toque */
+  .call-btn { padding: 11px 8px; font-size: 14px; }
+  .icon-btn { font-size: 20px; padding: 6px; }
+}
+
+@media (max-width: 480px) {
+  .server-icon, .rail-home, .rail-add { width: 42px; height: 42px; }
+  .sidebar { width: 260px; }
+}
+
+/* Desktop: esconde toggles mobile */
+.mobile-toggle { display: none; }
+.drawer-backdrop { display: none; }
+
