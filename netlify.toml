@@ -1,12 +1,8 @@
 # Netlify - frontend do JohnCord
 [build]
-  publish = "frontend"
-
-# Headers de seguranca basica
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
+  base = "frontend"
+  publish = "frontend/dist"
+  command = "npm run build"
 
 # Redireciona tudo para index.html (SPA)
 [[redirects]]
