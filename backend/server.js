@@ -145,29 +145,39 @@ wss.on('connection', (ws) => {
     // ----- Auth -----
     if (d.t === 'register') {
       const name = String(d.username || '').trim();
+      const pass = String(d.password || '');
       if (name.length < 2 || name.length > 20) return send(ws, { t: 'authErr', error: 'Nome deve ter entre 2 e 20 caracteres.' });
       if (Object.values(db.users).some(u => u.username.toLowerCase() === name.toLowerCase()))
-        return send(ws, { t: 'authErr', error: 'Este nome já está em uso.' });
-      if (!d.password || String(d.password).length < 4) return send(ws, { t: 'authErr', error: 'Senha deve ter pelo menos 4 caracteres.' });
+        return send(ws, { t: 'authErr', error: 'Este nome de usuário já está em uso.' });
+      if (!pass || pass.length < 4) return send(ws, { t: 'authErr', error: 'A senha deve ter pelo menos 4 caracteres.' });
       const salt = crypto.randomBytes(8).toString('hex');
       const colors = ['#5865f2','#eb459e','#3ba55c','#faa61a','#ed4245','#00a8fc','#9b59b6'];
       const user = {
         id: uid(), username: name,
-        salt, passHash: hash(d.password, salt),
+        salt, passHash: hash(pass, salt),
         color: colors[Math.floor(Math.random() * colors.length)],
         friends: []
       };
       db.users[user.id] = user;
-      db.servers[GENERAL_ID].members.push(user.id);
+      if (!db.servers[GENERAL_ID].members.includes(user.id)) {
+        db.servers[GENERAL_ID].members.push(user.id);
+      }
       save();
       login(user);
       send(ws, { t: 'authOk', boot: bootPayload() });
       return;
     }
     if (d.t === 'login') {
-      const user = Object.values(db.users).find(u => u.username.toLowerCase() === String(d.username || '').toLowerCase());
-      if (!user || hash(d.password, user.salt) !== user.passHash)
-        return send(ws, { t: 'authErr', error: 'Usuário ou senha incorretos.' });
+      const name = String(d.username || '').trim();
+      const pass = String(d.password || '');
+      if (!name || !pass) return send(ws, { t: 'authErr', error: 'Preencha o nome de usuário e a senha.' });
+      const user = Object.values(db.users).find(u => u.username.toLowerCase() === name.toLowerCase());
+      if (!user) {
+        return send(ws, { t: 'authErr', error: 'Conta não encontrada. Verifique o nome ou clique em "Criar conta".' });
+      }
+      if (hash(pass, user.salt) !== user.passHash) {
+        return send(ws, { t: 'authErr', error: 'Senha incorreta para esta conta.' });
+      }
       login(user);
       send(ws, { t: 'authOk', boot: bootPayload() });
       return;

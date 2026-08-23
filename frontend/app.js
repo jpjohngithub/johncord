@@ -248,6 +248,16 @@ $('authUser').onkeydown = e => { if (e.key === 'Enter') $('authPass').focus(); }
 $('authPass').onkeydown = e => { if (e.key === 'Enter') auth('login'); };
 if ($('btnConfigServer')) $('btnConfigServer').onclick = modalServerSettings;
 
+// Carregar credenciais salvas no navegador
+try {
+  const savedAuth = JSON.parse(localStorage.getItem('jc_auth') || 'null');
+  if (savedAuth && savedAuth.username && savedAuth.password) {
+    $('authUser').value = savedAuth.username;
+    $('authPass').value = savedAuth.password;
+    lastAuth = savedAuth;
+  }
+} catch (e) {}
+
 function auth(mode) {
   hideAuthError();
   const user = $('authUser').value.trim();
@@ -256,6 +266,7 @@ function auth(mode) {
     showAuthError('Informe o nome de usuário e a senha.');
     return;
   }
+  lastAuth = { t: mode, username: user, password: pass };
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     const isRemote = !location.hostname.includes('localhost') && !location.hostname.includes('127.0.0.1');
     if (isRemote && !getBackendUrl()) {
@@ -267,11 +278,30 @@ function auth(mode) {
     connect();
     return;
   }
-  lastAuth = { t: mode, username: user, password: pass };
   send(lastAuth);
 }
-function showAuthError(m) { $('authError').textContent = m; $('authError').style.display = 'block'; }
+
+function showAuthError(m) {
+  const box = $('authError');
+  box.innerHTML = esc(m);
+  if (m.includes('Conta não encontrada')) {
+    box.innerHTML += `<br><button class="link-btn" style="color:#00a8fc;margin-top:4px;background:none;border:none;cursor:pointer;text-decoration:underline" onclick="auth('register')">➕ Criar conta com este nome agora</button>`;
+  }
+  box.style.display = 'block';
+}
+
 function hideAuthError() { $('authError').style.display = 'none'; }
+
+function logout() {
+  localStorage.removeItem('jc_auth');
+  lastAuth = null;
+  S.user = null;
+  leaveVoice();
+  closeModal();
+  $('app').style.display = 'none';
+  $('authScreen').style.display = 'flex';
+  toast('Você saiu da sua conta.');
+}
 
 const pendingJoin = new URLSearchParams(location.search).get('join');
 
@@ -280,6 +310,9 @@ function onAuthOk(boot) {
   S.servers = boot.servers;
   S.friends = boot.friends;
   S.dmList = boot.dmList;
+  if (lastAuth) {
+    try { localStorage.setItem('jc_auth', JSON.stringify(lastAuth)); } catch (e) {}
+  }
   $('authScreen').style.display = 'none';
   $('app').style.display = 'flex';
   $('myName').textContent = S.user.username;
@@ -293,6 +326,7 @@ function onAuthOk(boot) {
   } else {
     openServer('geral');
   }
+  toast(`👋 Bem-vindo, ${S.user.username}!`);
 }
 
 /* ---------- Navegação ---------- */
@@ -828,7 +862,7 @@ function modalServerSettings() {
       💡 <em>Dica:</em> Se estiver rodando o servidor e o site juntos (localmente), deixe o campo vazio.
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      ${S.user ? `<button class="btn btn-danger" onclick="logout()">🚪 Sair da Conta</button>` : `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>`}
       <button class="btn btn-primary" id="mSaveBackend">Salvar e Conectar</button>
     </div>`);
 

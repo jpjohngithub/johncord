@@ -1,0 +1,29 @@
+{
+  "users": {},
+  "servers": {
+    "geral": {
+      "id": "geral",
+      "name": "JohnCord",
+      "icon": "J",
+      "owner": null,
+      "permanent": true,
+      "inviteCode": null,
+      "members": [],
+      "channels": [
+        {
+          "id": "geral-chat",
+          "name": "geral",
+          "type": "text",
+          "messages": []
+        },
+        {
+          "id": "geral-voz",
+          "name": "Geral",
+          "type": "voice"
+        }
+      ]
+    }
+  },
+  "dms": {},
+  "dmIndex": {}
+}
