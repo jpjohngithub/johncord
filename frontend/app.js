@@ -52,6 +52,7 @@ const S = {
   user: null,
   servers: [],
   friends: [],
+  requests: [],            // solicitacoes de amizade recebidas
   dmList: [],
   view: 'home',            // 'home' | serverId
   channelId: 'geral-chat',
@@ -68,6 +69,7 @@ const S = {
   userVolumes: {},
   lastAuthor: null,
   lastTs: 0,
+  dmCall: null,            // {peerId, state:'ringing'|'active'|'calling', pc, startedAt}
 };
 
 const $ = id => document.getElementById(id);
@@ -221,8 +223,25 @@ function handle(d) {
       handle._t = setTimeout(() => $('typingIndicator').textContent = '', 2500);
       break;
     case 'friends':
-      S.friends = d.friends; renderSidebar();
+      S.friends = d.friends;
+      renderSidebar();
+      if (S.view === 'home' && !S.dmId && S.homeTab === 'friends') { $('messages').innerHTML = ''; renderFriendsView(); }
+      if (d.info) toast('✓ ' + d.info);
       break;
+    case 'friendRequest':
+      S.requests = d.requests || [...S.requests, d.from];
+      toast(`📨 ${d.from.displayName || d.from.username} quer ser seu amigo!`);
+      renderSidebar();
+      if (S.view === 'home' && !S.dmId) { $('messages').innerHTML = ''; S.homeTab === 'add' ? renderAddFriendView() : renderFriendsView(); }
+      break;
+    case 'requests':
+      S.requests = d.requests;
+      renderSidebar();
+      break;
+    case 'searchResults':
+      renderSearchResults(d.results);
+      break;
+    case 'relayed': handleDmRelay(d.from, d.payload); break;
     case 'inviteUpdated': {
       const srv = S.servers.find(s => s.id === d.serverId);
       if (srv) srv.inviteCode = d.inviteCode;
@@ -319,7 +338,8 @@ const pendingJoin = new URLSearchParams(location.search).get('join');
 function onAuthOk(boot) {
   S.user = boot.user;
   S.servers = boot.servers;
-  S.friends = boot.friends;
+  S.friends = boot.friends || [];
+  S.requests = boot.requests || [];
   S.dmList = boot.dmList;
   if (lastAuth) {
     try { localStorage.setItem('jc_auth', JSON.stringify(lastAuth)); } catch (e) {}
@@ -712,9 +732,9 @@ function openUserProfileModal(userId) {
   const addBtn = $('pmBtnAdd');
   if (addBtn) {
     addBtn.onclick = () => {
-      send({ t: 'addFriend', username: u.username });
-      closeModal();
-      toast('Solicitação de amizade enviada!');
+      send({ t: 'friendReq', username: u.username });
+      addBtn.textContent = '⏳ Enviada';
+      addBtn.disabled = true;
     };
   }
 }
@@ -749,7 +769,7 @@ function renderSidebar() {
     header.textContent = 'Mensagens diretas';
     const tabs = document.createElement('div');
     tabs.className = 'home-tabs';
-    [['friends', '👥 Amigos'], ['add', '➕ Adicionar']].forEach(([k, label]) => {
+    [['friends', '👥 Amigos'], ['add', `➕ Adicionar${S.requests.length ? ` (${S.requests.length})` : ''}`]].forEach(([k, label]) => {
       const b = document.createElement('button');
       b.className = 'home-tab' + (S.homeTab === k ? ' active' : '');
       b.textContent = label;
@@ -852,18 +872,32 @@ function renderSidebar() {
 }
 
 function renderHeader() {
+  const btnCall = $('btnCallDm');
   if (S.view === 'home') {
     if (S.dmId) {
       const dm = S.dmList.find(x => x.dmId === S.dmId);
       $('chanIcon').textContent = '@';
-      $('chanName').textContent = dm ? dm.user.username : 'DM';
+      $('chanName').textContent = dm ? (dm.user.displayName || dm.user.username) : 'DM';
       $('btnInvite').style.display = 'none';
       $('btnMembers').style.display = 'none';
+      // Botao de ligar na chamada privada
+      if (btnCall) {
+        const isFriend = S.friends.some(f => f.id === (dm && dm.user.id));
+        const inCall = S.dmCall && dm && S.dmCall.peerId === dm.user.id;
+        btnCall.style.display = isFriend ? '' : 'none';
+        btnCall.textContent = inCall ? '🔴 Na chamada' : '📞 Ligar';
+        btnCall.onclick = () => {
+          if (!dm) return;
+          if (inCall) endDmCall();
+          else startDmCall(dm.user.id);
+        };
+      }
     } else {
       $('chanIcon').textContent = '👥';
       $('chanName').textContent = 'Amigos';
       $('btnInvite').style.display = 'none';
       $('btnMembers').style.display = 'none';
+      if (btnCall) btnCall.style.display = 'none';
     }
     return;
   }
@@ -873,6 +907,7 @@ function renderHeader() {
   $('chanName').textContent = ch ? ch.name : srv ? srv.name : '';
   $('btnInvite').style.display = srv && !srv.permanent ? '' : 'none';
   $('btnMembers').style.display = '';
+  if (btnCall) btnCall.style.display = 'none';
 }
 
 function requestHistory() {
@@ -1127,49 +1162,131 @@ function renderFriendsView() {
   const box = $('messages');
   const wrap = document.createElement('div');
   wrap.style.padding = '20px';
-  if (!S.friends.length) {
-    wrap.innerHTML = '<p style="color:var(--text-dim)">Nenhum amigo ainda. Use "Adicionar" para encontrar pessoas pelo nome!</p>';
+
+  // Solicitacoes pendentes
+  if (S.requests.length) {
+    const secTitle = document.createElement('div');
+    secTitle.className = 'member-cat';
+    secTitle.style.padding = '0 0 8px';
+    secTitle.textContent = `📨 Solicitações de amizade — ${S.requests.length}`;
+    wrap.appendChild(secTitle);
+    S.requests.forEach(u => {
+      const div = document.createElement('div');
+      div.className = 'friend-item';
+      const av = document.createElement('div'); av.className = 'user-avatar'; setAvatar(av, u);
+      const info = document.createElement('div'); info.className = 'fname';
+      info.innerHTML = `${esc(u.displayName || u.username)}<span class="fst">quer ser seu amigo</span>`;
+      const acts = document.createElement('div'); acts.className = 'friend-actions';
+      const okBtn = document.createElement('button');
+      okBtn.className = 'btn btn-small btn-primary'; okBtn.textContent = '✓ Aceitar';
+      okBtn.onclick = () => { send({ t: 'friendAccept', userId: u.id }); S.requests = S.requests.filter(r => r.id !== u.id); renderFriendsView(); };
+      const noBtn = document.createElement('button');
+      noBtn.className = 'btn btn-small btn-danger'; noBtn.textContent = '✕ Recusar';
+      noBtn.onclick = () => { send({ t: 'friendReject', userId: u.id }); S.requests = S.requests.filter(r => r.id !== u.id); renderFriendsView(); };
+      acts.appendChild(okBtn); acts.appendChild(noBtn);
+      div.appendChild(av); div.appendChild(info); div.appendChild(acts);
+      wrap.appendChild(div);
+    });
+    const hr = document.createElement('div');
+    hr.style.cssText = 'height:1px;background:rgba(255,255,255,.08);margin:16px 0';
+    wrap.appendChild(hr);
+  }
+
+  const allTitle = document.createElement('div');
+  allTitle.className = 'member-cat';
+  allTitle.style.padding = '0 0 8px';
+  allTitle.textContent = `👥 Todos os amigos — ${S.friends.length}`;
+  wrap.appendChild(allTitle);
+
+  if (!S.friends.length && !S.requests.length) {
+    wrap.innerHTML += '<p style="color:var(--text-dim)">Nenhum amigo ainda. Use a aba <b>➕ Adicionar</b> para buscar pessoas pelo nome!</p>';
   }
   S.friends.forEach(f => {
     const div = document.createElement('div');
     div.className = 'friend-item';
     const av = document.createElement('div'); av.className = 'user-avatar'; setAvatar(av, f);
     const info = document.createElement('div'); info.className = 'fname';
-    info.innerHTML = `${esc(f.username)}<span class="fst">${f.status === 'online' ? '🟢 Online' : '⚫ Offline'}</span>`;
+    const dispName = f.displayName || f.username;
+    info.innerHTML = `${esc(dispName)}${f.displayName ? ` <small style="color:var(--text-dim);font-weight:400">@${esc(f.username)}</small>` : ''}<span class="fst">${f.status === 'online' ? '🟢 Online' : '⚫ Offline'}</span>`;
     const acts = document.createElement('div'); acts.className = 'friend-actions';
+    const callBtn = document.createElement('button');
+    callBtn.className = 'btn btn-small btn-ghost'; callBtn.textContent = '📞 Ligar';
+    callBtn.onclick = () => startDmCall(f.id);
     const msgBtn = document.createElement('button');
     msgBtn.className = 'btn btn-small btn-primary'; msgBtn.textContent = '💬 Mensagem';
     msgBtn.onclick = () => startDmWith(f.id);
     const rmBtn = document.createElement('button');
     rmBtn.className = 'btn btn-small btn-danger'; rmBtn.textContent = 'Remover';
     rmBtn.onclick = () => { if (confirm(`Remover ${f.username}?`)) send({ t: 'removeFriend', userId: f.id }); };
-    acts.appendChild(msgBtn); acts.appendChild(rmBtn);
+    acts.appendChild(callBtn); acts.appendChild(msgBtn); acts.appendChild(rmBtn);
     div.appendChild(av); div.appendChild(info); div.appendChild(acts);
     wrap.appendChild(div);
   });
   box.appendChild(wrap);
 }
 
+let searchTimer = null;
 function renderAddFriendView() {
   const box = $('messages');
   const wrap = document.createElement('div');
-  wrap.style.padding = '20px'; wrap.style.maxWidth = '500px';
+  wrap.style.padding = '20px'; wrap.style.maxWidth = '560px';
   wrap.innerHTML = `
     <h3 style="color:var(--header)">Adicionar amigo</h3>
-    <p style="color:var(--text-dim);margin:8px 0 14px">Digite o nome exato do usuário.</p>`;
+    <p style="color:var(--text-dim);margin:8px 0 14px">Digite o nome do usuário e envie uma solicitação — a pessoa precisa aceitar para vocês se tornarem amigos.</p>`;
   const input = document.createElement('input');
-  input.className = 'input'; input.placeholder = 'Nome do usuário';
-  const btn = document.createElement('button');
-  btn.className = 'btn btn-primary'; btn.textContent = 'Enviar solicitação';
-  btn.style.marginTop = '10px';
-  btn.onclick = () => {
-    if (!input.value.trim()) return;
-    send({ t: 'addFriend', username: input.value.trim() });
-    input.value = '';
+  input.className = 'input'; input.placeholder = 'Buscar usuário...';
+  input.autocomplete = 'off';
+  const resultsBox = document.createElement('div');
+  resultsBox.id = 'searchResultsBox';
+  resultsBox.style.marginTop = '12px';
+  input.oninput = () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim();
+    if (!q) { resultsBox.innerHTML = ''; return; }
+    searchTimer = setTimeout(() => send({ t: 'searchUsers', q }), 250);
   };
-  input.onkeydown = e => { if (e.key === 'Enter') btn.click(); };
-  wrap.appendChild(input); wrap.appendChild(document.createElement('br')); wrap.appendChild(btn);
+  input.onkeydown = e => { if (e.key === 'Enter' && input.value.trim()) send({ t: 'searchUsers', q: input.value.trim() }); };
+  wrap.appendChild(input);
+  wrap.appendChild(resultsBox);
   box.appendChild(wrap);
+  setTimeout(() => input.focus(), 50);
+}
+
+function renderSearchResults(results) {
+  const box = $('searchResultsBox');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!results.length) {
+    box.innerHTML = '<p style="color:var(--text-dim);font-size:13px">Nenhum usuário encontrado.</p>';
+    return;
+  }
+  const labels = { friend: ['✓ Amigos', ''], incoming: ['✓ Aceitar pedido', 'btn-primary'], sent: ['⏳ Aguardando', ''] };
+  results.forEach(u => {
+    const div = document.createElement('div');
+    div.className = 'friend-item';
+    const av = document.createElement('div'); av.className = 'user-avatar'; setAvatar(av, u);
+    const info = document.createElement('div'); info.className = 'fname';
+    info.innerHTML = `${esc(u.displayName || u.username)}<span class="fst">@${esc(u.username)} · ${u.status === 'online' ? '🟢 Online' : '⚫ Offline'}</span>`;
+    const acts = document.createElement('div'); acts.className = 'friend-actions';
+    if (u.relation === 'none') {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-small btn-primary'; addBtn.textContent = '➕ Adicionar';
+      addBtn.onclick = () => {
+        send({ t: 'friendReq', username: u.username });
+        addBtn.textContent = '⏳ Enviada';
+        addBtn.disabled = true;
+        addBtn.classList.remove('btn-primary');
+      };
+      acts.appendChild(addBtn);
+    } else {
+      const span = document.createElement('span');
+      span.style.cssText = 'font-size:13px;color:var(--text-dim)';
+      span.textContent = labels[u.relation][0];
+      acts.appendChild(span);
+    }
+    div.appendChild(av); div.appendChild(info); div.appendChild(acts);
+    box.appendChild(div);
+  });
 }
 
 /* ---------- Envio ---------- */
@@ -2761,8 +2878,337 @@ $('msgInput').addEventListener('input', function () {
   this.style.height = Math.min(this.scrollHeight, 160) + 'px';
 });
 
-/* ---------- Navegacao mobile (gavetas) ---------- */
-function closeDrawers() { document.body.classList.remove('rail-open', 'sidebar-open'); }
+/* ---------- Chamada privada (DM) ---------- */
+let dmLocalStream = null;
+let dmPc = null;
+let dmTimerInt = null;
+let incomingCallFrom = null;
+
+function relayTo(to, payload) { send({ t: 'relay', to, payload }); }
+
+async function startDmCall(userId) {
+  if (S.dmCall) return toast('⚠ Você já está em uma chamada. Desligue primeiro.');
+  const f = S.friends.find(x => x.id === userId);
+  if (!f) return;
+  if (f.status !== 'online') return toast('⚠ ' + (f.displayName || f.username) + ' está offline agora.');
+  try {
+    dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { return toast('⚠ Permita o acesso ao microfone para ligar.'); }
+  unlockAudioContext();
+  S.dmCall = { peerId: userId, state: 'calling' };
+  showDmCallUI();
+  relayTo(userId, { type: 'dm-ring' });
+  S.dmCall.timeout = setTimeout(() => {
+    if (S.dmCall && S.dmCall.state === 'calling') { toast('⏱ Ninguém atendeu.'); cleanupDmCall(); }
+  }, 30000);
+}
+
+function handleDmRelay(from, p) {
+  if (!p || !p.type) return;
+  switch (p.type) {
+    case 'dm-ring': onIncomingCall(from); break;
+    case 'dm-accept': onDmCallAccepted(from); break;
+    case 'dm-decline': toast('📵 Chamada recusada.'); cleanupDmCall(); break;
+    case 'dm-busy': toast('⚠ A pessoa está em outra chamada.'); cleanupDmCall(); break;
+    case 'dm-end': toast('📞 Chamada encerrada.'); cleanupDmCall(); break;
+    case 'dm-offer': handleDmOffer(from, p.sdp); break;
+    case 'dm-answer': handleDmAnswer(from, p.sdp); break;
+    case 'dm-candidate':
+      if (dmPc && p.candidate) dmPc.addIceCandidate(new RTCIceCandidate(p.candidate)).catch(() => {});
+      break;
+  }
+}
+
+function onIncomingCall(from) {
+  if (S.dmCall) {
+    relayTo(from, { type: 'dm-busy' });
+    return;
+  }
+  incomingCallFrom = from;
+  const f = S.friends.find(x => x.id === from);
+  const name = f ? (f.displayName || f.username) : 'Alguém';
+  unlockAudioContext();
+  openModal(`
+    <h2>📞 Ligação recebida</h2>
+    <p><b>${esc(name)}</b> está te chamando no privado.</p>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="dcDecline">✕ Recusar</button>
+      <button class="btn btn-primary" id="dcAccept">📞 Aceitar</button>
+    </div>`);
+  $('modalOverlay').onclick = null; // nao fechar clicando fora durante chamada
+  $('dcAccept').onclick = acceptDmCall;
+  $('dcDecline').onclick = declineDmCall;
+  // auto-recusar apos 30s
+  setTimeout(() => { if (incomingCallFrom === from && !S.dmCall) closeModal(); }, 30000);
+}
+
+async function acceptDmCall() {
+  const from = incomingCallFrom;
+  incomingCallFrom = null;
+  closeModal();
+  if (!from) return;
+  try {
+    dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    relayTo(from, { type: 'dm-decline' });
+    return toast('⚠ Sem acesso ao microfone.');
+  }
+  S.dmCall = { peerId: from, state: 'active', startedAt: Date.now() };
+  relayTo(from, { type: 'dm-accept' });
+  showDmCallUI();
+}
+
+function declineDmCall() {
+  const from = incomingCallFrom;
+  incomingCallFrom = null;
+  closeModal();
+  if (from) relayTo(from, { type: 'dm-decline' });
+}
+
+function onDmCallAccepted(from) {
+  if (!S.dmCall || S.dmCall.peerId !== from) return;
+  clearTimeout(S.dmCall.timeout);
+  S.dmCall.state = 'active';
+  S.dmCall.startedAt = Date.now();
+  createDmPc(from, true);
+  updateDmCallUI();
+}
+
+function createDmPc(peerId, initiator) {
+  if (dmPc) return dmPc;
+  dmPc = new RTCPeerConnection({
+    iceServers: [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      {
+        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:80?transport=tcp', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ]
+  });
+  dmLocalStream.getTracks().forEach(t => dmPc.addTrack(t, dmLocalStream));
+  dmPc.onicecandidate = e => {
+    if (e.candidate) relayTo(peerId, { type: 'dm-candidate', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });
+  };
+  dmPc.ontrack = e => {
+    let audio = document.getElementById('dm-call-audio');
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.id = 'dm-call-audio';
+      audio.autoplay = true;
+      audio.className = 'remote-audio';
+      document.body.appendChild(audio);
+    }
+    audio.srcObject = e.streams[0] || new MediaStream([e.track]);
+    audio.muted = S.deafened;
+    audio.volume = S.deafened ? 0 : 1;
+    const play = () => audio.play().catch(() => {});
+    play();
+    document.addEventListener('click', play, { once: true });
+  };
+  dmPc.onconnectionstatechange = () => {
+    if (dmPc.connectionState === 'failed') { toast('⚠ Conexão da chamada falhou.'); endDmCall(); }
+    if (dmPc.connectionState === 'disconnected') setTimeout(() => { if (dmPc && dmPc.connectionState === 'disconnected') endDmCall(); }, 4000);
+  };
+  if (initiator) {
+    dmPc.createOffer()
+      .then(o => dmPc.setLocalDescription(o))
+      .then(() => relayTo(peerId, { type: 'dm-offer', sdp: dmPc.localDescription }))
+      .catch(() => {});
+  }
+  return dmPc;
+}
+
+async function handleDmOffer(from, sdp) {
+  // se estamos chamando e a pessoa aceitou mas ofereceu antes: aceita a oferta dela
+  createDmPc(from, false);
+  try {
+    await dmPc.setRemoteDescription(new RTCSessionDescription(sdp));
+    const answer = await dmPc.createAnswer();
+    await dmPc.setLocalDescription(answer);
+    relayTo(from, { type: 'dm-answer', sdp: dmPc.localDescription });
+    if (S.dmCall && S.dmCall.state !== 'active') { S.dmCall.state = 'active'; S.dmCall.startedAt = Date.now(); updateDmCallUI(); }
+  } catch (e) {}
+}
+
+async function handleDmAnswer(from, sdp) {
+  if (!dmPc) return;
+  try {
+    if (dmPc.signalingState !== 'stable') {
+      await dmPc.setRemoteDescription(new RTCSessionDescription(sdp));
+    }
+  } catch (e) {}
+}
+
+function endDmCall(silent) {
+  if (S.dmCall) relayTo(S.dmCall.peerId, { type: 'dm-end' });
+  cleanupDmCall(silent);
+}
+
+function cleanupDmCall(silent) {
+  clearTimeout(S.dmCall && S.dmCall.timeout);
+  if (dmPc) { try { dmPc.close(); } catch (e) {} dmPc = null; }
+  if (dmLocalStream) { dmLocalStream.getTracks().forEach(t => t.stop()); dmLocalStream = null; }
+  const a = document.getElementById('dm-call-audio');
+  if (a) a.remove();
+  clearInterval(dmTimerInt);
+  dmTimerInt = null;
+  incomingCallFrom = null;
+  S.dmCall = null;
+  hideDmCallUI();
+  renderHeader();
+}
+
+let dmMuted = false;
+function toggleDmMute() {
+  dmMuted = !dmMuted;
+  if (dmLocalStream) dmLocalStream.getAudioTracks().forEach(t => t.enabled = !dmMuted);
+  const b = $('dcmMute');
+  if (b) b.textContent = dmMuted ? '🔇 Mudo' : '🎙 Microfone';
+}
+
+function showDmCallUI() {
+  hideDmCallUI();
+  const f = S.friends.find(x => x.id === S.dmCall.peerId);
+  const name = f ? (f.displayName || f.username) : 'Chamada';
+  const bar = document.createElement('div');
+  bar.id = 'dmCallBar';
+  bar.className = 'call-bar';
+  bar.style.position = 'fixed';
+  bar.style.bottom = '16px';
+  bar.style.right = '16px';
+  bar.style.width = '280px';
+  bar.style.zIndex = '90';
+  bar.style.borderRadius = '10px';
+  bar.style.boxShadow = '0 8px 30px rgba(0,0,0,.5)';
+  bar.innerHTML = `
+    <div class="call-info" id="dcmInfo">📞 ${esc(name)} — ${S.dmCall.state === 'calling' ? 'chamando...' : 'conectado'}</div>
+    <div class="call-btns">
+      <button class="call-btn" id="dcmMute">🎙 Microfone</button>
+      <button class="call-btn danger" id="dcmEnd">🔴 Desligar</button>
+    </div>`;
+  document.body.appendChild(bar);
+  $('dcmMute').onclick = toggleDmMute;
+  $('dcmEnd').onclick = () => endDmCall();
+  clearInterval(dmTimerInt);
+  dmTimerInt = setInterval(updateDmCallUI, 1000);
+}
+
+function updateDmCallUI() {
+  const info = $('dcmInfo');
+  if (!info || !S.dmCall) return;
+  const f = S.friends.find(x => x.id === S.dmCall.peerId);
+  const name = f ? (f.displayName || f.username) : 'Chamada';
+  if (S.dmCall.state === 'active' && S.dmCall.startedAt) {
+    const secs = Math.floor((Date.now() - S.dmCall.startedAt) / 1000);
+    info.textContent = `📞 ${name} — ${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+  } else {
+    info.textContent = `📞 ${name} — chamando...`;
+  }
+}
+
+function hideDmCallUI() {
+  const bar = $('dmCallBar');
+  if (bar) bar.remove();
+}
+
+/* ---------- Personalizacao de aparencia ---------- */
+const THEME_PRESETS = {
+  dark:  { '--bg-dark': '#1e1f22', '--bg-sidebar': '#2b2d31', '--bg-chat': '#313338', '--bg-input': '#383a40', '--text': '#dbdee1', '--text-dim': '#949ba4', '--header': '#f2f3f5', '--panel': '#232428' },
+  light: { '--bg-dark': '#e3e5e8', '--bg-sidebar': '#f2f3f5', '--bg-chat': '#ffffff', '--bg-input': '#ebedef', '--text': '#2e3338', '--text-dim': '#5c5e66', '--header': '#060607', '--panel': '#ebedef' },
+  oled:  { '--bg-dark': '#000000', '--bg-sidebar': '#0a0a0a', '--bg-chat': '#111111', '--bg-input': '#1a1a1a', '--text': '#dbdee1', '--text-dim': '#8a8f98', '--header': '#f2f3f5', '--panel': '#000000' }
+};
+
+function loadTheme() {
+  try { return JSON.parse(localStorage.getItem('jc_theme')) || {}; } catch (e) { return {}; }
+}
+
+function applyTheme(t) {
+  const preset = THEME_PRESETS[t.theme] || THEME_PRESETS.dark;
+  const root = document.documentElement;
+  root.dataset.theme = t.theme || 'dark';
+  Object.entries(preset).forEach(([k, v]) => root.style.setProperty(k, v));
+  root.style.setProperty('--blurple', t.accent || '#5865f2');
+  root.style.setProperty('--font-app', t.font || "'Segoe UI', Roboto, Helvetica, Arial, sans-serif");
+  root.style.setProperty('--font-size', (t.fontSize || 15) + 'px');
+  document.body.style.fontFamily = t.font || '';
+  document.body.style.fontSize = (t.fontSize || 15) + 'px';
+}
+
+function saveTheme(patch) {
+  const t = Object.assign(loadTheme(), patch);
+  localStorage.setItem('jc_theme', JSON.stringify(t));
+  applyTheme(t);
+}
+
+function modalAppearance() {
+  const t = loadTheme();
+  const fonts = [
+    ["Padrão (Discord)", "'Segoe UI', Roboto, Helvetica, Arial, sans-serif"],
+    ["Arial", "Arial, sans-serif"],
+    ["Georgia (Serifa)", "Georgia, serif"],
+    ["Courier (Mono)", "'Courier New', monospace"],
+    ["Verdana", "Verdana, sans-serif"],
+    ["Trebuchet MS", "'Trebuchet MS', sans-serif"],
+    ["Divertida (Comic)", "'Comic Sans MS', cursive"]
+  ];
+  openModal(`
+    <h2>🎨 Personalizar JohnCord</h2>
+    <p>Deixe o app com a sua cara — as mudanças são salvas automaticamente.</p>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">TEMA:</label>
+    <div style="display:flex;gap:8px;margin-bottom:16px" id="themeModes">
+      ${[['dark', '🌙 Escuro'], ['light', '☀️ Claro'], ['oled', '🖤 OLED']].map(([v, l]) =>
+        `<button class="btn btn-small ${(t.theme || 'dark') === v ? 'btn-primary' : ''}" data-theme-val="${v}" style="flex:1">${l}</button>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DE DESTAQUE:</label>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+      <input type="color" id="thAccent" value="${t.accent || '#5865f2'}" style="width:44px;height:34px;border:none;background:none;cursor:pointer;padding:0">
+      <div style="display:flex;gap:6px" id="accentPresets">
+        ${['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#00a8fc', '#9b59b6'].map(c =>
+          `<div class="color-dot" data-accent="${c}" style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;border:2px solid rgba(255,255,255,.3)"></div>`).join('')}
+      </div>
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">FONTE:</label>
+    <select class="input" id="thFont" style="margin-bottom:16px">
+      ${fonts.map(([l, v]) => `<option value='${esc(v)}' ${t.font === v ? 'selected' : ''}>${l}</option>`).join('')}
+    </select>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">TAMANHO DA FONTE: <span id="thSizeVal">${t.fontSize || 15}px</span></label>
+    <input type="range" id="thSize" min="13" max="19" step="1" value="${t.fontSize || 15}" style="width:100%;margin-bottom:16px;accent-color:var(--blurple)">
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="thReset">↩ Restaurar padrão</button>
+      <button class="btn btn-primary" onclick="closeModal()">Concluído</button>
+    </div>`);
+
+  document.querySelectorAll('#themeModes button').forEach(b => {
+    b.onclick = () => {
+      saveTheme({ theme: b.dataset.themeVal });
+      document.querySelectorAll('#themeModes button').forEach(x => x.classList.remove('btn-primary'));
+      b.classList.add('btn-primary');
+    };
+  });
+  $('thAccent').oninput = e => saveTheme({ accent: e.target.value });
+  document.querySelectorAll('#accentPresets .color-dot').forEach(d => {
+    d.onclick = () => { saveTheme({ accent: d.dataset.accent }); $('thAccent').value = d.dataset.accent; };
+  });
+  $('thFont').onchange = e => saveTheme({ font: e.target.value });
+  $('thSize').oninput = e => { $('thSizeVal').textContent = e.target.value + 'px'; saveTheme({ fontSize: Number(e.target.value) }); };
+  $('thReset').onclick = () => {
+    localStorage.removeItem('jc_theme');
+    applyTheme({});
+    modalAppearance();
+    toast('Aparência restaurada.');
+  };
+}
+applyTheme(loadTheme());
+
+if ($('btnTheme')) $('btnTheme').onclick = modalAppearance;
+
+/* ---------- Navegacao mobile (gavetas) ---------- */function closeDrawers() { document.body.classList.remove('rail-open', 'sidebar-open'); }
 $('mobileMenu').onclick = e => {
   e.stopPropagation();
   document.body.classList.toggle('sidebar-open');

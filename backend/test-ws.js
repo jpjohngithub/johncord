@@ -36,10 +36,29 @@ function ok(name, cond) { console.log((cond ? 'PASS' : 'FAIL') + ' - ' + name); 
   const got = await waitMsg(a.ws, 'msgNew');
   ok('mensagem em tempo real no geral', got.msg.content.includes('mundo'));
 
-  // amizade
-  a.ws.send(JSON.stringify({ t: 'addFriend', username: 'TesteB' + suffix }));
-  await new Promise(r => setTimeout(r, 150));
-  ok('amizade criada', true);
+  // solicitacao de amizade (A -> B) e aceite
+  a.ws.send(JSON.stringify({ t: 'friendReq', username: 'TesteB' + suffix }));
+  const reqNotif = await waitMsg(b.ws, 'friendRequest');
+  ok('pedido de amizade recebido pelo destino', !!reqNotif.from);
+  const accP = waitMsg(a.ws, 'friends', 3000);
+  b.ws.send(JSON.stringify({ t: 'friendAccept', userId: a.boot.user.id }));
+  const acc = await accP;
+  ok('amizade criada somente apos aceite', Array.isArray(acc.friends) && acc.friends.length === 1);
+
+  // busca de usuarios
+  const search = await (async () => {
+    const p = waitMsg(a.ws, 'searchResults');
+    a.ws.send(JSON.stringify({ t: 'searchUsers', q: 'TesteB' + suffix }));
+    return p;
+  })();
+  ok('busca de usuarios encontra com relacao friend',
+    search.results.length === 1 && search.results[0].relation === 'friend');
+
+  // relay entre amigos (usado pela call privada)
+  const relayP = waitMsg(b.ws, 'relayed');
+  a.ws.send(JSON.stringify({ t: 'relay', to: b.boot.user.id, payload: { type: 'dm-ring' } }));
+  const relayed = await relayP;
+  ok('relay de chamada privada entregue', relayed.payload.type === 'dm-ring');
 
   // abrir DM e historico
   const dmOpen = await (async () => {

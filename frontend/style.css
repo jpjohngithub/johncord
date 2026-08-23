@@ -1203,3 +1203,19 @@ audio.remote-audio {
 .mobile-toggle { display: none; }
 .drawer-backdrop { display: none; }
 
+/* ============ TEMA CLARO (ajustes em cores fixas) ============ */
+html[data-theme="light"] .user-panel { background: var(--panel); }
+html[data-theme="light"] .user-avatar::after { border-color: var(--panel); }
+html[data-theme="light"] .call-bar { background: var(--panel); }
+html[data-theme="light"] .home-tab { background: #dcdee1; color: var(--text-dim); }
+html[data-theme="light"] .home-tab.active { background: rgba(0,0,0,.09); color: var(--header); }
+html[data-theme="light"] .server-icon, html[data-theme="light"] .rail-home, html[data-theme="light"] .rail-add { background: #d4d7dc; }
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #c4c9ce; }
+html[data-theme="light"] .toast { background: #ffffff; color: #060607; border-color: rgba(0,0,0,.15); }
+html[data-theme="light"] .msg-group:hover { background: rgba(0,0,0,.04); }
+html[data-theme="light"] .invite-link { background: var(--bg-input); color: #006ce7; }
+html[data-theme="light"] .modal-overlay { background: rgba(0,0,0,.4); }
+html[data-theme="light"] .input { background: #ffffff; color: var(--text); }
+
+html[data-theme="oled"] .server-icon, html[data-theme="oled"] .rail-home, html[data-theme="oled"] .rail-add { background: #161616; }
+

@@ -144,6 +144,16 @@ function sysMsg(serverId, channelId, text) {
   for (const m of srv.members) sendTo(m, { t: 'msgNew', serverId, channelId, msg: ch.messages[ch.messages.length - 1] });
 }
 
+function makeFriends(a, b) {
+  if (!a.friends) a.friends = [];
+  if (!b.friends) b.friends = [];
+  if (!a.friends.includes(b.id)) a.friends.push(b.id);
+  if (!b.friends.includes(a.id)) b.friends.push(a.id);
+  save();
+  sendTo(a.id, { t: 'friends', friends: a.friends.map(getUserPublic).filter(Boolean), info: `${b.username} agora é seu amigo!` });
+  sendTo(b.id, { t: 'friends', friends: b.friends.map(getUserPublic).filter(Boolean), info: `${a.username} agora é seu amigo!` });
+}
+
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server: http.createServer((req, res) => {
   // Servir arquivos estáticos
@@ -550,17 +560,59 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // ----- Amigos -----
-    if (d.t === 'addFriend') {
+    // ----- Amigos (com solicitacao) -----
+    if (d.t === 'friendReq') {
       const target = Object.values(db.users).find(u => u.username.toLowerCase() === String(d.username || '').trim().toLowerCase());
       if (!target) return send(ws, { t: 'err', error: 'Usuário não encontrado.' });
       if (target.id === me.id) return send(ws, { t: 'err', error: 'Você não pode se adicionar.' });
-      if (!me.friends.includes(target.id)) me.friends.push(target.id);
-      if (!target.friends.includes(me.id)) target.friends.push(me.id);
+      if ((me.friends || []).includes(target.id)) return send(ws, { t: 'err', error: `Vocês já são amigos.` });
+      if (!target.friendRequests) target.friendRequests = [];
+      if (target.friendRequests.includes(me.id)) return send(ws, { t: 'ok', info: 'Solicitação já enviada. Aguarde a pessoa aceitar.' });
+      if ((target.friendRequests || []).length > 50) return send(ws, { t: 'err', error: 'Esta pessoa tem muitas solicitações pendentes.' });
+      // se a outra pessoa ja me enviou pedido, aceita direto
+      const reverseIdx = (me.friendRequests || []).indexOf(target.id);
+      if (reverseIdx !== -1) {
+        me.friendRequests.splice(reverseIdx, 1);
+        makeFriends(me, target);
+        return;
+      }
+      target.friendRequests.push(me.id);
       save();
-      sendTo(me.id, { t: 'friends', friends: me.friends.map(getUserPublic).filter(Boolean) });
-      sendTo(target.id, { t: 'friends', friends: target.friends.map(getUserPublic).filter(Boolean) });
-      send(ws, { t: 'ok', info: `${target.username} agora é seu amigo!` });
+      sendTo(target.id, { t: 'friendRequest', from: getUserPublic(me.id), requests: target.friendRequests.map(getUserPublic).filter(Boolean) });
+      send(ws, { t: 'ok', info: `Solicitação enviada para ${target.username}!` });
+      return;
+    }
+    if (d.t === 'friendAccept') {
+      if (!me.friendRequests) me.friendRequests = [];
+      const idx = me.friendRequests.indexOf(d.userId);
+      if (idx === -1) return send(ws, { t: 'err', error: 'Solicitação não encontrada.' });
+      me.friendRequests.splice(idx, 1);
+      const other = db.users[d.userId];
+      if (!other) return;
+      makeFriends(me, other);
+      return;
+    }
+    if (d.t === 'friendReject') {
+      if (!me.friendRequests) me.friendRequests = [];
+      me.friendRequests = me.friendRequests.filter(id => id !== d.userId);
+      save();
+      sendTo(me.id, { t: 'requests', requests: me.friendRequests.map(getUserPublic).filter(Boolean) });
+      return;
+    }
+    if (d.t === 'searchUsers') {
+      const q = String(d.q || '').trim().toLowerCase();
+      if (q.length < 1) return send(ws, { t: 'searchResults', results: [] });
+      const results = Object.values(db.users)
+        .filter(u => u.id !== me.id && u.username.toLowerCase().includes(q))
+        .slice(0, 10)
+        .map(u => {
+          let relation = 'none';
+          if ((me.friends || []).includes(u.id)) relation = 'friend';
+          else if ((me.friendRequests || []).includes(u.id)) relation = 'incoming';
+          else if ((u.friendRequests || []).includes(me.id)) relation = 'sent';
+          return { ...getUserPublic(u.id), relation };
+        });
+      send(ws, { t: 'searchResults', results });
       return;
     }
     if (d.t === 'removeFriend') {
@@ -569,6 +621,14 @@ wss.on('connection', (ws) => {
       if (other) other.friends = other.friends.filter(f => f !== me.id);
       save();
       sendTo(me.id, { t: 'friends', friends: me.friends.map(getUserPublic).filter(Boolean) });
+      return;
+    }
+
+    // ----- Relay para call privada (apenas entre amigos) -----
+    if (d.t === 'relay') {
+      const target = db.users[d.to];
+      if (!target || !(me.friends || []).includes(target.id)) return;
+      sendTo(d.to, { t: 'relayed', from: me.id, payload: d.payload });
       return;
     }
 
@@ -649,7 +709,8 @@ wss.on('connection', (ws) => {
     return {
       user: getUserPublic(me.id),
       servers: serversOf(me.id),
-      friends: me.friends.map(getUserPublic).filter(Boolean),
+      friends: (me.friends || []).map(getUserPublic).filter(Boolean),
+      requests: (me.friendRequests || []).map(getUserPublic).filter(Boolean),
       dmList: buildDmList(me.id)
     };
   }
