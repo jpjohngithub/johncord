@@ -1,6 +1,8 @@
-# Netlify - JohnCord 2.0 Frontend
+# Netlify - JohnCord 2.0
 [build]
-  publish = "frontend"
+  base = "frontend"
+  publish = "dist"
+  command = "node build.js"
 
 # Redireciona tudo para index.html (SPA)
 [[redirects]]
