@@ -1840,7 +1840,10 @@ async function toggleScreenShare() {
   }
   try {
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
+      video: {
+        cursor: 'always',
+        displaySurface: 'monitor'
+      },
       audio: true
     });
     S.screenSharing = true;
@@ -1857,7 +1860,7 @@ async function toggleScreenShare() {
 
     updateVoiceBar(S.voice.serverId, S.voice.channelId);
     renderVoiceRoom();
-    toast('🖥️ Compartilhamento de tela iniciado!');
+    toast('🖥️ Você está transmitindo sua tela ao vivo!');
   } catch (err) {
     if (err.name !== 'NotAllowedError') {
       toast('⚠ Não foi possível iniciar o compartilhamento de tela.');
@@ -1867,11 +1870,20 @@ async function toggleScreenShare() {
 
 function stopScreenShare(notify = true) {
   if (screenStream) {
+    for (const [pid, pc] of Object.entries(peers)) {
+      const senders = pc.getSenders();
+      senders.forEach(sender => {
+        if (sender.track && screenStream.getTracks().includes(sender.track)) {
+          try { pc.removeTrack(sender); } catch (e) {}
+        }
+      });
+    }
     screenStream.getTracks().forEach(t => t.stop());
     screenStream = null;
   }
   if (S.screenSharing) {
     S.screenSharing = false;
+    if (S.spotlightUser === S.user?.id) S.spotlightUser = null;
     if (notify) send({ t: 'voiceScreen', screenSharing: false });
     for (const [pid, pc] of Object.entries(peers)) {
       createOffer(pc, pid);
@@ -1998,8 +2010,109 @@ function renderVoiceRoom() {
   }
 
   const users = ((S.voiceStates[srvId] || {})[chId]) || [];
-  const hasAnyScreen = S.screenSharing || users.some(u => u.screenSharing);
+  const otherUsers = users.filter(u => u.id !== S.user?.id);
 
+  // Determina se devemos renderizar em modo Spotlight (Foco na tela de alguém)
+  let spotlightTarget = null;
+  if (S.spotlightUser) {
+    if (S.spotlightUser === S.user?.id && S.screenSharing && screenStream) {
+      spotlightTarget = { isMe: true, user: S.user, stream: screenStream };
+    } else {
+      const u = otherUsers.find(x => x.id === S.spotlightUser && x.screenSharing);
+      const vid = document.getElementById('video-' + S.spotlightUser);
+      if (u && vid && vid.srcObject) {
+        spotlightTarget = { isMe: false, user: u, stream: vid.srcObject };
+      }
+    }
+  }
+
+  // MODO SPOTLIGHT (TEATRO / PALCO PRINCIPAL)
+  if (spotlightTarget) {
+    const wrap = document.createElement('div');
+    wrap.className = 'vr-spotlight-layout';
+
+    // Palco Principal
+    const main = document.createElement('div');
+    main.className = 'vr-spotlight-main';
+    
+    const v = document.createElement('video');
+    v.autoplay = true;
+    v.playsInline = true;
+    v.muted = spotlightTarget.isMe;
+    v.srcObject = spotlightTarget.stream;
+    v.title = "Clique duplo para Tela Cheia";
+    v.ondblclick = () => toggleFullscreen(v);
+    main.appendChild(v);
+    v.play().catch(() => {});
+
+    const overlay = document.createElement('div');
+    overlay.className = 'vr-tile-overlay';
+    overlay.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="badge-live-pulse">🔴 AO VIVO</span>
+        <span style="font-weight:700">${esc(spotlightTarget.user.displayName || spotlightTarget.user.username)}</span>
+      </div>
+      <div class="vr-actions">
+        <button class="vr-action-btn" id="spotUnfocusBtn" title="Voltar para Grade">⊞ Modo Grade</button>
+        ${!spotlightTarget.isMe ? `<button class="vr-action-btn" id="spotVolBtn">🔊 ${getUserVolume(spotlightTarget.user.id)}%</button>` : ''}
+        <button class="vr-action-btn" id="spotFsBtn">⛶ Tela Cheia</button>
+      </div>
+    `;
+
+    overlay.querySelector('#spotUnfocusBtn').onclick = () => {
+      S.spotlightUser = null;
+      renderVoiceRoom();
+    };
+    overlay.querySelector('#spotFsBtn').onclick = () => toggleFullscreen(v);
+    const sVol = overlay.querySelector('#spotVolBtn');
+    if (sVol) sVol.onclick = () => openVolumeModal(spotlightTarget.user.id, spotlightTarget.user.displayName || spotlightTarget.user.username);
+
+    main.appendChild(overlay);
+    wrap.appendChild(main);
+
+    // Barra de Miniaturas dos Participantes
+    const strip = document.createElement('div');
+    strip.className = 'vr-spotlight-strip';
+
+    // Minha miniatura na barra
+    const myStrip = document.createElement('div');
+    myStrip.className = 'vr-strip-tile' + (S.spotlightUser === S.user?.id ? ' active' : '');
+    myStrip.innerHTML = `
+      <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${S.user?.avatar || (S.user?.displayName || S.user?.username || '?')[0].toUpperCase()}</div>
+      <span class="vr-strip-name">${esc(S.user?.displayName || S.user?.username || 'Você')} (Você)</span>
+    `;
+    if (S.screenSharing) {
+      myStrip.onclick = () => { S.spotlightUser = S.user?.id; renderVoiceRoom(); };
+      myStrip.title = "Clique para focar na sua transmissão";
+    }
+    strip.appendChild(myStrip);
+
+    // Miniaturas dos outros
+    otherUsers.forEach(u => {
+      const uStrip = document.createElement('div');
+      uStrip.className = 'vr-strip-tile' + (S.spotlightUser === u.id ? ' active' : '');
+      const hasScreen = u.screenSharing;
+      uStrip.innerHTML = `
+        <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (u.displayName || u.username || '?')[0].toUpperCase()}</div>
+        <span class="vr-strip-name">${esc(u.displayName || u.username)}</span>
+        ${hasScreen ? `<span class="badge-live-pulse" style="font-size:9px;padding:1px 4px;margin-top:2px">AO VIVO</span>` : ''}
+      `;
+      if (hasScreen) {
+        uStrip.onclick = () => { S.spotlightUser = u.id; renderVoiceRoom(); };
+        uStrip.title = "Clique para focar nesta transmissão";
+      }
+      strip.appendChild(uStrip);
+    });
+
+    wrap.appendChild(strip);
+    stage.innerHTML = '';
+    stage.appendChild(wrap);
+    updateVoiceControls();
+    return;
+  }
+
+  // MODO GRADE (MOSAICO)
+  const hasAnyScreen = S.screenSharing || otherUsers.some(u => u.screenSharing);
   const grid = document.createElement('div');
   grid.className = 'vr-grid' + (hasAnyScreen ? ' has-screen' : '');
 
@@ -2016,6 +2129,7 @@ function renderVoiceRoom() {
     v.title = "Clique duplo para Tela Cheia";
     v.ondblclick = () => toggleFullscreen(v);
     myTile.appendChild(v);
+    v.play().catch(() => {});
     const hint = document.createElement('div');
     hint.className = 'fullscreen-hint';
     hint.textContent = '⛶ Duplo clique para Tela Cheia';
@@ -2040,12 +2154,24 @@ function renderVoiceRoom() {
   const myOverlay = document.createElement('div');
   myOverlay.className = 'vr-tile-overlay';
   myOverlay.innerHTML = `
-    <span>${esc(S.user?.displayName || S.user?.username || 'Você')} (Você)${S.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+    <div style="display:flex;align-items:center;gap:6px">
+      ${S.screenSharing ? `<span class="badge-live-pulse">🔴 AO VIVO</span>` : ''}
+      <span>${esc(S.user?.displayName || S.user?.username || 'Você')} (Você)</span>
+    </div>
     <div class="vr-actions">
       <span>${S.deafened ? '🎧🔇' : (S.muted ? '🔇' : '🎙️')}</span>
+      ${S.screenSharing ? `<button class="vr-action-btn" id="mySpotBtn" title="Focar Transmissão">🔍 Focar</button>` : ''}
       ${S.screenSharing ? `<button class="vr-action-btn" id="myFsBtn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
     </div>
   `;
+  const mySpot = myOverlay.querySelector('#mySpotBtn');
+  if (mySpot) {
+    mySpot.onclick = (e) => {
+      e.stopPropagation();
+      S.spotlightUser = S.user?.id;
+      renderVoiceRoom();
+    };
+  }
   const myFs = myOverlay.querySelector('#myFsBtn');
   if (myFs) {
     myFs.onclick = (e) => {
@@ -2058,7 +2184,7 @@ function renderVoiceRoom() {
   grid.appendChild(myTile);
 
   // Cards dos Outros Usuários na Call
-  users.filter(u => u.id !== S.user?.id).forEach(u => {
+  otherUsers.forEach(u => {
     const tile = document.createElement('div');
     tile.className = 'vr-tile' + (u.screenSharing ? ' is-screen' : '');
     const remoteVid = document.getElementById('video-' + u.id);
@@ -2071,10 +2197,18 @@ function renderVoiceRoom() {
       v.title = "Clique duplo para Tela Cheia";
       v.ondblclick = () => toggleFullscreen(v);
       tile.appendChild(v);
+      v.play().catch(() => {});
       const hint = document.createElement('div');
       hint.className = 'fullscreen-hint';
       hint.textContent = '⛶ Duplo clique para Tela Cheia';
       tile.appendChild(hint);
+    } else if (u.screenSharing) {
+      tile.innerHTML = `
+        <div class="vr-tile-avatar">
+          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (u.displayName || u.username || '?')[0].toUpperCase()}</div>
+          <span class="badge-live-pulse" style="margin-top:8px">📡 Conectando Transmissão...</span>
+        </div>
+      `;
     } else {
       const uDispName = u.displayName || u.username;
       const uTag = `@${u.username}`;
@@ -2095,16 +2229,29 @@ function renderVoiceRoom() {
     const overlay = document.createElement('div');
     overlay.className = 'vr-tile-overlay';
     overlay.innerHTML = `
-      <span style="cursor:pointer" onclick="openUserProfileModal('${u.id}')">${esc(u.displayName || u.username)}${u.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+      <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="openUserProfileModal('${u.id}')">
+        ${u.screenSharing ? `<span class="badge-live-pulse">🔴 AO VIVO</span>` : ''}
+        <span>${esc(u.displayName || u.username)}</span>
+      </div>
       <div class="vr-actions">
         <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
         <button class="vr-action-btn vr-vol-btn" title="Ajustar Volume">🔊 ${getUserVolume(u.id)}%</button>
+        ${u.screenSharing ? `<button class="vr-action-btn vr-spot-btn" title="Assistir e Focar na Transmissão">👁️ Assistir</button>` : ''}
         ${u.screenSharing ? `<button class="vr-action-btn vr-fs-btn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
       </div>
     `;
 
     const volBtn = overlay.querySelector('.vr-vol-btn');
     if (volBtn) volBtn.onclick = (e) => { e.stopPropagation(); openVolumeModal(u.id, u.displayName || u.username); };
+
+    const spotBtn = overlay.querySelector('.vr-spot-btn');
+    if (spotBtn) {
+      spotBtn.onclick = (e) => {
+        e.stopPropagation();
+        S.spotlightUser = u.id;
+        renderVoiceRoom();
+      };
+    }
 
     const fsBtn = overlay.querySelector('.vr-fs-btn');
     if (fsBtn) {
@@ -2126,16 +2273,30 @@ function renderVoiceRoom() {
 
 function getPeer(peerId, initiator) {
   if (peers[peerId]) return peers[peerId];
-  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' }
+    ]
+  });
   peers[peerId] = pc;
-  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  if (screenStream) screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+  
+  if (localStream) {
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  }
+  if (screenStream) {
+    screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+  }
   
   pc.onicecandidate = e => {
-    if (e.candidate) send({ t: 'signal', to: peerId, data: { type: 'candidate', candidate: e.candidate } });
+    if (e.candidate) {
+      send({ t: 'signal', to: peerId, data: { type: 'candidate', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate } });
+    }
   };
   
   pc.ontrack = e => {
+    const stream = e.streams[0] || new MediaStream([e.track]);
     if (e.track.kind === 'video') {
       let video = document.getElementById('video-' + peerId);
       if (!video) {
@@ -2147,7 +2308,13 @@ function getPeer(peerId, initiator) {
         video.style.display = 'none';
         document.body.appendChild(video);
       }
-      video.srcObject = e.streams[0];
+      video.srcObject = stream;
+      video.play().catch(() => {});
+      e.track.onended = () => {
+        video.srcObject = null;
+        if (S.spotlightUser === peerId) S.spotlightUser = null;
+        renderVoiceRoom();
+      };
       renderVoiceRoom();
     } else {
       let audio = document.getElementById('audio-' + peerId);
@@ -2158,9 +2325,10 @@ function getPeer(peerId, initiator) {
         audio.className = 'remote-audio';
         document.body.appendChild(audio);
       }
-      audio.srcObject = e.streams[0];
+      audio.srcObject = stream;
       audio.muted = S.deafened;
       audio.volume = S.deafened ? 0 : Math.min(1, getUserVolume(peerId) / 100);
+      audio.play().catch(() => {});
     }
   };
   
@@ -2170,7 +2338,7 @@ function getPeer(peerId, initiator) {
 
 async function createOffer(pc, peerId) {
   try {
-    const offer = await pc.createOffer();
+    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
     send({ t: 'signal', to: peerId, data: { type: 'offer', sdp: pc.localDescription } });
   } catch (e) {}
@@ -2189,6 +2357,7 @@ function syncVoicePeers() {
       if (a) a.remove();
       const v = document.getElementById('video-' + pid);
       if (v) v.remove();
+      if (S.spotlightUser === pid) S.spotlightUser = null;
     }
   }
   inChan.forEach(pid => {
@@ -2201,14 +2370,16 @@ async function handleSignal(from, data) {
   const pc = getPeer(from, false);
   try {
     if (data.type === 'offer') {
-      await pc.setRemoteDescription(data.sdp);
+      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       send({ t: 'signal', to: from, data: { type: 'answer', sdp: pc.localDescription } });
     } else if (data.type === 'answer') {
-      await pc.setRemoteDescription(data.sdp);
-    } else if (data.type === 'candidate') {
-      await pc.addIceCandidate(data.candidate);
+      if (pc.signalingState !== 'stable') {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      }
+    } else if (data.type === 'candidate' && data.candidate) {
+      await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
     }
   } catch (e) {}
 }

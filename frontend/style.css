@@ -464,6 +464,115 @@ input, textarea { font-family: inherit; }
   grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
 }
 
+/* Modo Palco / Foco de Transmissão (Spotlight / Theater Mode) */
+.vr-spotlight-layout {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vr-spotlight-main {
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 12px 40px rgba(0,0,0,.7);
+  border: 2px solid rgba(255,255,255,.08);
+}
+
+.vr-spotlight-main video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.vr-spotlight-strip {
+  height: 110px;
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  align-items: center;
+}
+
+.vr-strip-tile {
+  width: 150px;
+  min-width: 150px;
+  height: 100%;
+  background: #232428;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: .15s;
+}
+
+.vr-strip-tile:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,.2);
+}
+
+.vr-strip-tile.active {
+  border-color: var(--blurple);
+}
+
+.vr-strip-tile.speaking {
+  border-color: var(--green);
+  box-shadow: 0 0 12px rgba(59,165,92,.6);
+}
+
+.vr-strip-tile .user-avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+
+.vr-strip-tile .vr-strip-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--header);
+  margin-top: 4px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge-live-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #ed4245;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  box-shadow: 0 0 12px rgba(237,66,69,.6);
+  animation: pulse-live 1.5s infinite;
+}
+
+@keyframes pulse-live {
+  0% { box-shadow: 0 0 0 0 rgba(237,66,69,.7); }
+  70% { box-shadow: 0 0 0 8px rgba(237,66,69,0); }
+  100% { box-shadow: 0 0 0 0 rgba(237,66,69,0); }
+}
+
 .vr-tile {
   background: #232428;
   border-radius: 16px;
@@ -476,6 +585,10 @@ input, textarea { font-family: inherit; }
   box-shadow: 0 10px 30px rgba(0,0,0,.5);
   border: 2.5px solid transparent;
   transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+
+.vr-tile.is-screen {
+  background: #0d0e10;
 }
 
 .vr-tile.speaking {
@@ -556,13 +669,14 @@ input, textarea { font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(17,18,20,.75);
+  background: rgba(17,18,20,.85);
   padding: 7px 14px;
   border-radius: 8px;
   font-size: 13px;
   color: #fff;
   backdrop-filter: blur(8px);
   z-index: 5;
+  border: 1px solid rgba(255,255,255,.08);
 }
 
 .vr-actions {
@@ -588,6 +702,11 @@ input, textarea { font-family: inherit; }
 
 .vr-action-btn:hover {
   background: var(--blurple);
+}
+
+.vr-action-btn.active-spotlight {
+  background: #5865f2;
+  color: #fff;
 }
 
 /* Barra de controles flutuante inferior da sala de voz (Dock Moderno) */
