@@ -237,6 +237,9 @@ function handle(d) {
     case 'voicePeers':
       d.peers.forEach(pid => getPeer(pid, true));
       break;
+    case 'voiceSpeaking':
+      updateSpeakingUI(d.userId, d.speaking);
+      break;
     case 'profileUpdated':
       S.user = d.user;
       $('myName').textContent = S.user.username;
@@ -831,7 +834,8 @@ function renderSidebar() {
         const isMuted = u.muted;
         const isDeaf = u.deafened;
         const isLive = u.screenSharing;
-        vu.className = 'voice-user' + (isMuted ? ' muted' : '') + (isDeaf ? ' deafened' : '');
+        vu.className = 'voice-user vu-item' + (isMuted ? ' muted' : '') + (isDeaf ? ' deafened' : '');
+        vu.dataset.uid = u.id;
         const liveBadge = isLive ? `<span class="badge-live">AO VIVO</span>` : '';
         const stateIcon = isDeaf ? '🎧' : (isMuted ? '🔇' : '');
         const isMe = S.user && u.id === S.user.id;
@@ -1043,6 +1047,7 @@ function renderMemberList() {
 function memberItem(m, topRole) {
   const div = document.createElement('div');
   div.className = 'member-item' + (m.status === 'offline' ? ' offline' : '') + ' clickable';
+  div.dataset.uid = m.id;
   const av = document.createElement('div');
   av.className = 'user-avatar'; av.style.width = av.style.height = '32px';
   setAvatar(av, m);
@@ -1792,6 +1797,13 @@ let voiceStartTime = null;
 let voiceTimerInterval = null;
 let globalAudioCtx = null;
 
+// Voice Activity Detection (VAD)
+let vadInterval = null;
+let vadSource = null;
+let vadAnalyser = null;
+let isSpeaking = false;
+let speakingTimeout = null;
+
 function unlockAudioContext() {
   try {
     if (!globalAudioCtx) {
@@ -1802,6 +1814,95 @@ function unlockAudioContext() {
       globalAudioCtx.resume();
     }
   } catch (e) {}
+}
+
+function setupLocalVAD(stream) {
+  cleanupLocalVAD();
+  if (!stream) return;
+  unlockAudioContext();
+  if (!globalAudioCtx) return;
+
+  try {
+    vadSource = globalAudioCtx.createMediaStreamSource(stream);
+    vadAnalyser = globalAudioCtx.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    vadAnalyser.smoothingTimeConstant = 0.2;
+    vadSource.connect(vadAnalyser);
+
+    const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
+    
+    const checkAudioLevel = () => {
+      if (!vadAnalyser || !S.voice) return;
+      if (S.muted || S.deafened) {
+        if (isSpeaking) setLocalSpeaking(false);
+        return;
+      }
+      vadAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / dataArray.length;
+      
+      // Limiar de detecção de fala
+      if (average > 10) {
+        if (!isSpeaking) setLocalSpeaking(true);
+        if (speakingTimeout) clearTimeout(speakingTimeout);
+        speakingTimeout = setTimeout(() => {
+          setLocalSpeaking(false);
+        }, 350);
+      }
+    };
+
+    vadInterval = setInterval(checkAudioLevel, 40);
+  } catch (e) {}
+}
+
+function cleanupLocalVAD() {
+  if (vadInterval) { clearInterval(vadInterval); vadInterval = null; }
+  if (speakingTimeout) { clearTimeout(speakingTimeout); speakingTimeout = null; }
+  if (vadSource) { try { vadSource.disconnect(); } catch (e) {} vadSource = null; }
+  if (vadAnalyser) { try { vadAnalyser.disconnect(); } catch (e) {} vadAnalyser = null; }
+  setLocalSpeaking(false);
+}
+
+function setLocalSpeaking(speaking) {
+  if (isSpeaking === speaking) return;
+  isSpeaking = speaking;
+  updateSpeakingUI(S.user?.id, isSpeaking);
+  send({ t: 'voiceSpeaking', speaking: isSpeaking });
+}
+
+function updateSpeakingUI(userId, speaking) {
+  if (!userId) return;
+  // 1. Meu Avatar no painel inferior
+  if (userId === S.user?.id) {
+    const myAv = $('myAvatar');
+    if (myAv) myAv.classList.toggle('speaking', speaking);
+  }
+
+  // 2. Cards da chamada de voz (mosaico e palco)
+  const tiles = document.querySelectorAll(`.vr-tile[data-uid="${userId}"], .vr-strip-tile[data-uid="${userId}"]`);
+  tiles.forEach(tile => {
+    tile.classList.toggle('speaking', speaking);
+    const av = tile.querySelector('.user-avatar');
+    if (av) av.classList.toggle('speaking', speaking);
+  });
+
+  // 3. Usuário no canal de voz na barra lateral
+  const vu = document.querySelector(`.vu-item[data-uid="${userId}"]`);
+  if (vu) {
+    vu.classList.toggle('speaking', speaking);
+    const av = vu.querySelector('.user-avatar');
+    if (av) av.classList.toggle('speaking', speaking);
+  }
+
+  // 4. Usuário na lista de membros do servidor
+  const mem = document.querySelector(`.member-item[data-uid="${userId}"]`);
+  if (mem) {
+    const av = mem.querySelector('.user-avatar');
+    if (av) av.classList.toggle('speaking', speaking);
+  }
 }
 
 function startVoiceTimer() {
@@ -1857,6 +1958,7 @@ async function joinVoice(serverId, channelId) {
       });
     }
     localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
+    setupLocalVAD(localStream);
     S.voice = { serverId, channelId };
     S.muted = false;
     S.deafened = false;
@@ -1872,6 +1974,7 @@ async function joinVoice(serverId, channelId) {
 }
 
 function leaveVoice() {
+  cleanupLocalVAD();
   stopScreenShare(false);
   stopVoiceTimer();
   Object.values(peers).forEach(pc => pc.close());
@@ -1895,6 +1998,7 @@ function toggleMute() {
   }
   S.muted = !S.muted;
   if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
+  if (S.muted) setLocalSpeaking(false);
   send({ t: 'voiceMute', muted: S.muted });
   updateVoiceButtons();
   updateVoiceBar(S.voice ? S.voice.serverId : null, S.voice ? S.voice.channelId : null);
@@ -1906,6 +2010,7 @@ function toggleDeafen() {
   if (S.deafened) {
     S.muted = true;
     if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = false);
+    setLocalSpeaking(false);
     document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.muted = true);
     toast('🔇 Ensurdecido: áudio geral silenciado.');
   } else {
@@ -2185,6 +2290,7 @@ function renderVoiceRoom() {
     // Minha miniatura na barra
     const myStrip = document.createElement('div');
     myStrip.className = 'vr-strip-tile' + (S.spotlightUser === S.user?.id ? ' active' : '');
+    myStrip.dataset.uid = S.user?.id;
     const myStripAv = document.createElement('div');
     myStripAv.className = 'user-avatar';
     setAvatar(myStripAv, S.user);
@@ -2204,6 +2310,7 @@ function renderVoiceRoom() {
     otherUsers.forEach(u => {
       const uStrip = document.createElement('div');
       uStrip.className = 'vr-strip-tile' + (S.spotlightUser === u.id ? ' active' : '');
+      uStrip.dataset.uid = u.id;
       const hasScreen = u.screenSharing;
       const uStripAv = document.createElement('div');
       uStripAv.className = 'user-avatar';
@@ -2240,6 +2347,7 @@ function renderVoiceRoom() {
   // Card do Usuário Local
   const myTile = document.createElement('div');
   myTile.className = 'vr-tile' + (S.screenSharing ? ' is-screen' : '');
+  myTile.dataset.uid = S.user?.id;
   
   if (S.screenSharing && screenStream) {
     const v = document.createElement('video');
@@ -2313,6 +2421,7 @@ function renderVoiceRoom() {
   otherUsers.forEach(u => {
     const tile = document.createElement('div');
     tile.className = 'vr-tile' + (u.screenSharing ? ' is-screen' : '');
+    tile.dataset.uid = u.id;
     const remoteVid = document.getElementById('video-' + u.id);
 
     if (u.screenSharing && remoteVid && remoteVid.srcObject) {

@@ -621,13 +621,32 @@ input, textarea { font-family: inherit; }
   justify-content: center;
   border: 4px solid transparent;
   box-shadow: 0 8px 20px rgba(0,0,0,.3);
-  transition: .15s;
+  transition: box-shadow .12s ease-in-out, transform .12s ease-in-out, border-color .12s ease-in-out;
 }
 
-.vr-tile.speaking .vr-tile-avatar .user-avatar {
-  border-color: var(--green);
-  box-shadow: 0 0 0 4px rgba(59,165,92,.4), 0 0 28px rgba(59,165,92,.8);
-  transform: scale(1.05);
+/* Contorno verde de voz igual ao Discord */
+.user-avatar.speaking,
+.vr-tile.speaking .vr-tile-avatar .user-avatar,
+.vr-strip-tile.speaking .user-avatar,
+.vu-item.speaking .user-avatar,
+.member-item.speaking .user-avatar {
+  box-shadow: 0 0 0 3.5px #23a55a, 0 0 16px rgba(35, 165, 90, 0.75) !important;
+  border-color: #23a55a !important;
+  transform: scale(1.04);
+}
+
+.vr-tile.speaking {
+  border-color: #23a55a !important;
+  box-shadow: 0 0 0 2px #23a55a, 0 8px 24px rgba(35, 165, 90, 0.25) !important;
+}
+
+.vr-strip-tile.speaking {
+  border-color: #23a55a !important;
+}
+
+.vu-item.speaking .vu-name {
+  color: #23a55a !important;
+  font-weight: 700;
 }
 
 .vr-user-name-box {

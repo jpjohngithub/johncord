@@ -607,6 +607,18 @@ wss.on('connection', (ws) => {
       if (v) { v.screenSharing = !!d.screenSharing; broadcastVoiceStates(); }
       return;
     }
+    if (d.t === 'voiceSpeaking') {
+      const v = voice.get(me.id);
+      if (v) {
+        const roomPeers = [...voice.entries()]
+          .filter(([u, vInfo]) => vInfo.channelId === v.channelId && vInfo.serverId === v.serverId && u !== me.id)
+          .map(([u]) => u);
+        roomPeers.forEach(pid => {
+          sendTo(pid, { t: 'voiceSpeaking', userId: me.id, speaking: !!d.speaking });
+        });
+      }
+      return;
+    }
     if (d.t === 'voiceLeave') {
       leaveVoice();
       return;
