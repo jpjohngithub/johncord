@@ -57,7 +57,14 @@ const typing = new Map();   // key `${serverId}:${channelId}:${userId}` -> timeo
 function getUserPublic(id) {
   const u = db.users[id];
   if (!u) return null;
-  return { id: u.id, username: u.username, color: u.color, status: byUser.has(id) ? 'online' : 'offline' };
+  return {
+    id: u.id,
+    username: u.username,
+    color: u.color || '#5865f2',
+    avatar: u.avatar || null,
+    customStatus: u.customStatus || '',
+    status: byUser.has(id) ? 'online' : 'offline'
+  };
 }
 function serversOf(userId) {
   return Object.values(db.servers)
@@ -184,6 +191,20 @@ wss.on('connection', (ws) => {
     }
 
     if (!me) return;
+
+    // ----- Perfil -----
+    if (d.t === 'updateProfile') {
+      const user = db.users[me.id];
+      if (!user) return;
+      if (d.color && typeof d.color === 'string') user.color = d.color.slice(0, 20);
+      if (d.customStatus !== undefined) user.customStatus = String(d.customStatus).slice(0, 80);
+      if (d.avatar !== undefined) user.avatar = String(d.avatar).slice(0, 10);
+      save();
+      me = user;
+      send(ws, { t: 'profileUpdated', user: getUserPublic(me.id) });
+      broadcastUsers();
+      return;
+    }
 
     // ----- Mensagens -----
     if (d.t === 'msg') {

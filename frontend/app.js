@@ -237,6 +237,14 @@ function handle(d) {
     case 'voicePeers':
       d.peers.forEach(pid => getPeer(pid, true));
       break;
+    case 'profileUpdated':
+      S.user = d.user;
+      $('myName').textContent = S.user.username;
+      $('myStatus').textContent = S.user.customStatus || 'Online';
+      setAvatar($('myAvatar'), S.user);
+      renderRail();
+      renderSidebar();
+      break;
     case 'signal': handleSignal(d.from, d.data); break;
   }
 }
@@ -412,9 +420,100 @@ function currentServer() { return S.servers.find(s => s.id === S.view); }
 
 /* ---------- Render ---------- */
 function setAvatar(el, user) {
-  el.textContent = (user.username || '?')[0].toUpperCase();
+  if (!el || !user) return;
+  if (user.avatar) {
+    el.textContent = user.avatar;
+  } else {
+    el.textContent = (user.username || '?')[0].toUpperCase();
+  }
   el.style.background = user.color || '#5865f2';
 }
+
+function modalEditProfile() {
+  if (!S.user) return;
+  const colors = ['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#00a8fc', '#9b59b6', '#2ecc71', '#e67e22', '#1abc9c'];
+  const emojis = ['🎮', '👑', '⚡', '🎧', '🚀', '🔥', '🐱', '💀', '💎', '⭐', '👾', '🎯'];
+  
+  let selectedColor = S.user.color || '#5865f2';
+  let selectedAvatar = S.user.avatar || '';
+
+  openModal(`
+    <h2>🎨 Editar Perfil</h2>
+    <p>Personalize seu avatar, cor e status no JohnCord:</p>
+    
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:8px">
+      <div id="previewAvatar" class="user-avatar" style="width:54px;height:54px;font-size:24px;background:${selectedColor}">
+        ${selectedAvatar || (S.user.username || '?')[0].toUpperCase()}
+      </div>
+      <div>
+        <div style="font-weight:700;font-size:16px;color:var(--header)">${esc(S.user.username)}</div>
+        <div id="previewStatus" style="font-size:12px;color:var(--text-dim)">${esc(S.user.customStatus || 'Online')}</div>
+      </div>
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">COR DO PERFIL:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="colorPickerBox">
+      ${colors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">ÍCONE / EMOJI DO AVATAR:</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="emojiPickerBox">
+      <button class="btn btn-small btn-ghost" id="btnDefaultLetter" style="font-size:11px">Letra inicial</button>
+      ${emojis.map(em => `<button class="emoji-opt-btn" data-emoji="${em}" style="font-size:18px;background:#2b2d31;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">${em}</button>`).join('')}
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">STATUS PERSONALIZADO / BIO:</label>
+    <input class="input" id="mCustomStatus" placeholder="Ex: Jogando JohnCord 🎮" maxlength="80" value="${esc(S.user.customStatus || '')}">
+
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="mSaveProfile">Salvar Alterações</button>
+    </div>
+  `);
+
+  const prevAv = $('previewAvatar');
+  const prevSt = $('previewStatus');
+
+  document.querySelectorAll('#colorPickerBox .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      selectedColor = dot.dataset.color;
+      document.querySelectorAll('#colorPickerBox .color-dot').forEach(d => d.style.borderColor = 'transparent');
+      dot.style.borderColor = '#fff';
+      prevAv.style.background = selectedColor;
+    };
+  });
+
+  document.querySelectorAll('#emojiPickerBox .emoji-opt-btn').forEach(btn => {
+    btn.onclick = () => {
+      selectedAvatar = btn.dataset.emoji;
+      prevAv.textContent = selectedAvatar;
+    };
+  });
+
+  $('btnDefaultLetter').onclick = () => {
+    selectedAvatar = '';
+    prevAv.textContent = (S.user.username || '?')[0].toUpperCase();
+  };
+
+  $('mCustomStatus').oninput = e => {
+    prevSt.textContent = e.target.value || 'Online';
+  };
+
+  $('mSaveProfile').onclick = () => {
+    const statusVal = $('mCustomStatus').value.trim();
+    send({
+      t: 'updateProfile',
+      color: selectedColor,
+      avatar: selectedAvatar,
+      customStatus: statusVal
+    });
+    closeModal();
+    toast('Perfil atualizado com sucesso!');
+  };
+}
+
+if ($('myAvatar')) $('myAvatar').onclick = modalEditProfile;
+if ($('myName')) $('myName').onclick = modalEditProfile;
 
 function renderRail() {
   const list = $('serverList');
