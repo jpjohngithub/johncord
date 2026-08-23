@@ -60,8 +60,11 @@ function getUserPublic(id) {
   return {
     id: u.id,
     username: u.username,
+    displayName: u.displayName || u.username,
     color: u.color || '#5865f2',
+    bannerColor: u.bannerColor || '#5865f2',
     avatar: u.avatar || null,
+    bio: u.bio || '',
     customStatus: u.customStatus || '',
     status: byUser.has(id) ? 'online' : 'offline'
   };
@@ -161,6 +164,9 @@ wss.on('connection', (ws) => {
       const colors = ['#5865f2','#eb459e','#3ba55c','#faa61a','#ed4245','#00a8fc','#9b59b6'];
       const user = {
         id: uid(), username: name,
+        displayName: name,
+        bio: '',
+        bannerColor: '#5865f2',
         salt, passHash: hash(pass, salt),
         color: colors[Math.floor(Math.random() * colors.length)],
         friends: []
@@ -196,6 +202,12 @@ wss.on('connection', (ws) => {
     if (d.t === 'updateProfile') {
       const user = db.users[me.id];
       if (!user) return;
+      if (d.displayName !== undefined) {
+        const dn = String(d.displayName).trim();
+        if (dn.length >= 1 && dn.length <= 32) user.displayName = dn;
+      }
+      if (d.bio !== undefined) user.bio = String(d.bio).slice(0, 200);
+      if (d.bannerColor && typeof d.bannerColor === 'string') user.bannerColor = d.bannerColor.slice(0, 20);
       if (d.color && typeof d.color === 'string') user.color = d.color.slice(0, 20);
       if (d.customStatus !== undefined) user.customStatus = String(d.customStatus).slice(0, 80);
       if (d.avatar !== undefined) user.avatar = String(d.avatar).slice(0, 10);
@@ -203,6 +215,12 @@ wss.on('connection', (ws) => {
       me = user;
       send(ws, { t: 'profileUpdated', user: getUserPublic(me.id) });
       broadcastUsers();
+      return;
+    }
+
+    if (d.t === 'getProfile') {
+      const u = getUserPublic(d.userId);
+      if (u) send(ws, { t: 'userProfile', profile: u });
       return;
     }
 
@@ -215,7 +233,16 @@ wss.on('connection', (ws) => {
       if (!ch.messages) ch.messages = [];
       const content = String(d.content || '').slice(0, 2000).trim();
       if (!content) return;
-      const msg = { id: uid(), userId: me.id, username: me.username, color: me.color, content, ts: Date.now() };
+      const msg = {
+        id: uid(),
+        userId: me.id,
+        username: me.username,
+        displayName: me.displayName || me.username,
+        avatar: me.avatar || null,
+        color: me.color,
+        content,
+        ts: Date.now()
+      };
       ch.messages.push(msg);
       if (ch.messages.length > 500) ch.messages.splice(0, ch.messages.length - 500);
       save();
@@ -228,7 +255,16 @@ wss.on('connection', (ws) => {
       const dm = getDm(me.id, target.id);
       const content = String(d.content || '').slice(0, 2000).trim();
       if (!content) return;
-      const msg = { id: uid(), userId: me.id, username: me.username, color: me.color, content, ts: Date.now() };
+      const msg = {
+        id: uid(),
+        userId: me.id,
+        username: me.username,
+        displayName: me.displayName || me.username,
+        avatar: me.avatar || null,
+        color: me.color,
+        content,
+        ts: Date.now()
+      };
       dm.messages.push(msg);
       if (dm.messages.length > 500) dm.messages.splice(0, dm.messages.length - 500);
       save();

@@ -46,10 +46,10 @@
     <header class="sidebar-header" id="sidebarHeader">JohnCord</header>
     <div id="channelView" class="sidebar-body"></div>
     <div id="userPanel" class="user-panel">
-      <div class="user-avatar" id="myAvatar">?</div>
-      <div class="user-info">
+      <div class="user-avatar" id="myAvatar" title="Clique para editar seu perfil">?</div>
+      <div class="user-info" id="myInfoWrap" title="Clique para editar seu perfil" style="cursor:pointer">
         <span id="myName">...</span>
-        <small id="myStatus">#0000</small>
+        <small id="myStatus">Online</small>
       </div>
       <button id="btnMute" title="Silenciar microfone (Mute)" class="icon-btn">🎤</button>
       <button id="btnDeafen" title="Ensurdecer / Mute Geral (Deafen)" class="icon-btn">🎧</button>
@@ -83,6 +83,16 @@
 
       <!-- ABA DEDICADA DA CALL / TRANSMISSÃO DE TELA -->
       <div id="voiceRoomView" class="voice-room-view" style="display:none">
+        <div class="voice-room-topbar">
+          <div class="vr-top-info">
+            <span class="vr-live-dot"></span>
+            <span id="vrChanTitle" class="vr-chan-title">🔊 Geral</span>
+            <span class="vr-timer-badge" id="vrTimerBadge">⏱️ <span id="vrTimer">00:00</span> em chamada</span>
+          </div>
+          <div class="vr-top-actions">
+            <button class="vr-top-btn" id="btnVrFullscreen" title="Tela Cheia do Palco">⛶ Palco Cheio</button>
+          </div>
+        </div>
         <div class="voice-room-stage" id="voiceRoomStage"></div>
         <div class="voice-room-controls" id="voiceRoomControls">
           <button class="vr-btn" id="vrBtnMute" title="Silenciar Microfone">🎤 Microfone</button>

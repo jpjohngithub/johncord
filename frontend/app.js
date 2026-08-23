@@ -323,8 +323,8 @@ function onAuthOk(boot) {
   }
   $('authScreen').style.display = 'none';
   $('app').style.display = 'flex';
-  $('myName').textContent = S.user.username;
-  $('myStatus').textContent = 'Online';
+  $('myName').textContent = S.user.displayName || S.user.username;
+  $('myStatus').textContent = S.user.customStatus || 'Online';
   setAvatar($('myAvatar'), S.user);
   renderRail();
   renderSidebar();
@@ -431,39 +431,83 @@ function setAvatar(el, user) {
 
 function modalEditProfile() {
   if (!S.user) return;
-  const colors = ['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#00a8fc', '#9b59b6', '#2ecc71', '#e67e22', '#1abc9c'];
-  const emojis = ['🎮', '👑', '⚡', '🎧', '🚀', '🔥', '🐱', '💀', '💎', '⭐', '👾', '🎯'];
+  const avatarColors = ['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#00a8fc', '#9b59b6', '#2ecc71', '#e67e22', '#1abc9c'];
+  const bannerColors = ['#5865f2', '#eb459e', '#3ba55c', '#faa61a', '#ed4245', '#202225', '#00a8fc', '#9b59b6', '#111214', '#e67e22'];
+  const emojis = ['🎮', '👑', '⚡', '🎧', '🚀', '🔥', '🐱', '💀', '💎', '⭐', '👾', '🎯', '☕', '🌟', '🛡️', '⚔️'];
   
+  let selectedDisplayName = S.user.displayName || S.user.username;
+  let selectedBio = S.user.bio || '';
+  let selectedBannerColor = S.user.bannerColor || '#5865f2';
   let selectedColor = S.user.color || '#5865f2';
   let selectedAvatar = S.user.avatar || '';
+  let selectedStatus = S.user.customStatus || '';
 
   openModal(`
-    <h2>🎨 Editar Perfil</h2>
-    <p>Personalize seu avatar, cor e status no JohnCord:</p>
-    
-    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:8px">
-      <div id="previewAvatar" class="user-avatar" style="width:54px;height:54px;font-size:24px;background:${selectedColor}">
-        ${selectedAvatar || (S.user.username || '?')[0].toUpperCase()}
+    <h2>🎨 Personalizar Perfil</h2>
+    <p>Edite seu nome de exibição, sobre mim, avatar, banner e status:</p>
+
+    <!-- PREVIEW AO VIVO DO CARD -->
+    <div class="profile-card-box" style="margin-bottom:16px;border:1px solid rgba(255,255,255,.1)">
+      <div class="profile-card-banner" id="pPrevBanner" style="background:${selectedBannerColor}"></div>
+      <div class="profile-card-body">
+        <div class="profile-avatar-row">
+          <div class="profile-avatar-large" id="pPrevAvatar" style="background:${selectedColor}">
+            ${selectedAvatar || (selectedDisplayName || S.user.username || '?')[0].toUpperCase()}
+          </div>
+        </div>
+        <div class="profile-card-names">
+          <div class="profile-display-title" id="pPrevDisplay">${esc(selectedDisplayName)}</div>
+          <div class="profile-handle-title">@${esc(S.user.username)}</div>
+        </div>
+        <div class="profile-status-badge" id="pPrevStatusBadge">
+          <span id="pPrevStatusText">${esc(selectedStatus || 'Online')}</span>
+        </div>
+        <div class="profile-card-divider"></div>
+        <div class="profile-section-label">Sobre Mim</div>
+        <div class="profile-bio-text" id="pPrevBio">${esc(selectedBio || 'Nenhuma bio informada ainda.')}</div>
       </div>
+    </div>
+
+    <!-- CAMPOS DE EDIÇÃO -->
+    <div style="display:flex;flex-direction:column;gap:12px;max-height:360px;overflow-y:auto;padding-right:4px">
       <div>
-        <div style="font-weight:700;font-size:16px;color:var(--header)">${esc(S.user.username)}</div>
-        <div id="previewStatus" style="font-size:12px;color:var(--text-dim)">${esc(S.user.customStatus || 'Online')}</div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DE EXIBIÇÃO (APELIDO):</label>
+        <input class="input" id="mDisplayName" placeholder="Seu nome no chat e na call" maxlength="32" value="${esc(selectedDisplayName)}">
+        <span style="font-size:11px;color:var(--text-dim)">Seu nome de login continua sendo @${esc(S.user.username)}</span>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">SOBRE MIM (BIO):</label>
+        <textarea class="input" id="mBio" rows="2" placeholder="Escreva um pouco sobre você..." maxlength="200" style="resize:vertical">${esc(selectedBio)}</textarea>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">STATUS PERSONALIZADO / ATIVIDADE:</label>
+        <input class="input" id="mCustomStatus" placeholder="Ex: Jogando JohnCord 🎮" maxlength="80" value="${esc(selectedStatus)}">
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO BANNER DO PERFIL:</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px" id="bannerPickerBox">
+          ${bannerColors.map(c => `<div class="color-dot${c === selectedBannerColor ? ' active' : ''}" data-bcolor="${c}" style="width:26px;height:26px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c === selectedBannerColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO AVATAR:</label>
+        <div style="display:flex;flex-wrap:wrap;gap:8px" id="colorPickerBox">
+          ${avatarColors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">ÍCONE / EMOJI DO AVATAR:</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px" id="emojiPickerBox">
+          <button class="btn btn-small btn-ghost" id="btnDefaultLetter" style="font-size:11px">Letra Inicial</button>
+          ${emojis.map(em => `<button class="emoji-opt-btn" data-emoji="${em}" style="font-size:16px;background:#2b2d31;border:none;border-radius:6px;padding:3px 7px;cursor:pointer">${em}</button>`).join('')}
+        </div>
       </div>
     </div>
-
-    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">COR DO PERFIL:</label>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="colorPickerBox">
-      ${colors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
-    </div>
-
-    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">ÍCONE / EMOJI DO AVATAR:</label>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px" id="emojiPickerBox">
-      <button class="btn btn-small btn-ghost" id="btnDefaultLetter" style="font-size:11px">Letra inicial</button>
-      ${emojis.map(em => `<button class="emoji-opt-btn" data-emoji="${em}" style="font-size:18px;background:#2b2d31;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">${em}</button>`).join('')}
-    </div>
-
-    <label style="font-size:12px;color:var(--text-dim);font-weight:600;display:block;margin-bottom:6px">STATUS PERSONALIZADO / BIO:</label>
-    <input class="input" id="mCustomStatus" placeholder="Ex: Jogando JohnCord 🎮" maxlength="80" value="${esc(S.user.customStatus || '')}">
 
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
@@ -471,8 +515,35 @@ function modalEditProfile() {
     </div>
   `);
 
-  const prevAv = $('previewAvatar');
-  const prevSt = $('previewStatus');
+  const prevBanner = $('pPrevBanner');
+  const prevAv = $('pPrevAvatar');
+  const prevDisp = $('pPrevDisplay');
+  const prevBio = $('pPrevBio');
+  const prevSt = $('pPrevStatusText');
+
+  $('mDisplayName').oninput = e => {
+    selectedDisplayName = e.target.value.trim() || S.user.username;
+    prevDisp.textContent = selectedDisplayName;
+  };
+
+  $('mBio').oninput = e => {
+    selectedBio = e.target.value;
+    prevBio.textContent = selectedBio || 'Nenhuma bio informada ainda.';
+  };
+
+  $('mCustomStatus').oninput = e => {
+    selectedStatus = e.target.value;
+    prevSt.textContent = selectedStatus || 'Online';
+  };
+
+  document.querySelectorAll('#bannerPickerBox .color-dot').forEach(dot => {
+    dot.onclick = () => {
+      selectedBannerColor = dot.dataset.bcolor;
+      document.querySelectorAll('#bannerPickerBox .color-dot').forEach(d => d.style.borderColor = 'transparent');
+      dot.style.borderColor = '#fff';
+      prevBanner.style.background = selectedBannerColor;
+    };
+  });
 
   document.querySelectorAll('#colorPickerBox .color-dot').forEach(dot => {
     dot.onclick = () => {
@@ -492,17 +563,18 @@ function modalEditProfile() {
 
   $('btnDefaultLetter').onclick = () => {
     selectedAvatar = '';
-    prevAv.textContent = (S.user.username || '?')[0].toUpperCase();
-  };
-
-  $('mCustomStatus').oninput = e => {
-    prevSt.textContent = e.target.value || 'Online';
+    prevAv.textContent = (selectedDisplayName || S.user.username || '?')[0].toUpperCase();
   };
 
   $('mSaveProfile').onclick = () => {
+    const disp = $('mDisplayName').value.trim() || S.user.username;
+    const bioVal = $('mBio').value;
     const statusVal = $('mCustomStatus').value.trim();
     send({
       t: 'updateProfile',
+      displayName: disp,
+      bio: bioVal,
+      bannerColor: selectedBannerColor,
       color: selectedColor,
       avatar: selectedAvatar,
       customStatus: statusVal
@@ -512,8 +584,69 @@ function modalEditProfile() {
   };
 }
 
+function openUserProfileModal(userId) {
+  if (userId === S.user?.id) {
+    modalEditProfile();
+    return;
+  }
+  const u = (S.presence || []).find(x => x.id === userId) || (S.members || []).find(x => x.id === userId) || { id: userId, username: 'Usuário' };
+  const isFriend = (S.friends || []).some(f => f.id === userId);
+  const dispName = u.displayName || u.username;
+  const bannerColor = u.bannerColor || '#5865f2';
+  const avatarBg = u.color || '#5865f2';
+  const avatarContent = u.avatar || (dispName || u.username || '?')[0].toUpperCase();
+  const bioText = u.bio || 'Este usuário ainda não escreveu nada sobre ele.';
+  const statusText = u.customStatus || (u.status === 'online' ? '🟢 Online' : '⚪ Offline');
+
+  openModal(`
+    <div class="profile-card-box">
+      <div class="profile-card-banner" style="background:${bannerColor}"></div>
+      <div class="profile-card-body">
+        <div class="profile-avatar-row">
+          <div class="profile-avatar-large" style="background:${avatarBg}">${avatarContent}</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-small" id="pmBtnDm">💬 Mensagem</button>
+            ${!isFriend ? `<button class="btn btn-ghost btn-small" id="pmBtnAdd">👥 Adicionar</button>` : ''}
+          </div>
+        </div>
+        <div class="profile-card-names">
+          <div class="profile-display-title">${esc(dispName)}</div>
+          <div class="profile-handle-title">@${esc(u.username)}</div>
+        </div>
+        <div class="profile-status-badge">
+          <span>${esc(statusText)}</span>
+        </div>
+        <div class="profile-card-divider"></div>
+        <div class="profile-section-label">Sobre Mim</div>
+        <div class="profile-bio-text">${esc(bioText)}</div>
+        <div class="profile-card-divider"></div>
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const dmBtn = $('pmBtnDm');
+  if (dmBtn) {
+    dmBtn.onclick = () => {
+      closeModal();
+      openDirectMessage(userId);
+    };
+  }
+  const addBtn = $('pmBtnAdd');
+  if (addBtn) {
+    addBtn.onclick = () => {
+      send({ t: 'addFriend', username: u.username });
+      closeModal();
+      toast('Solicitação de amizade enviada!');
+    };
+  }
+}
+
 if ($('myAvatar')) $('myAvatar').onclick = modalEditProfile;
 if ($('myName')) $('myName').onclick = modalEditProfile;
+if ($('myInfoWrap')) $('myInfoWrap').onclick = modalEditProfile;
 
 function renderRail() {
   const list = $('serverList');
@@ -691,21 +824,30 @@ function appendMsg(m) {
   }
   const grouped = m.userId === S.lastAuthor && (m.ts - S.lastTs) < 5 * 60 * 1000;
   S.lastAuthor = m.userId; S.lastTs = m.ts;
+  const disp = m.displayName || m.username;
+  const tagHtml = m.username && m.displayName && m.displayName !== m.username ? `<span style="font-size:11px;color:var(--text-dim);margin-left:4px;font-weight:normal">@${esc(m.username)}</span>` : '';
+  const avContent = m.avatar || (disp || m.username || '?')[0].toUpperCase();
+
   if (!grouped) {
     const g = document.createElement('div');
     g.className = 'msg-group';
     const av = document.createElement('div');
     av.className = 'm-avatar';
-    av.style.background = m.color;
-    av.textContent = (m.username || '?')[0].toUpperCase();
+    av.style.background = m.color || '#5865f2';
+    av.textContent = avContent;
+    av.style.cursor = 'pointer';
+    av.title = 'Ver perfil';
+    av.onclick = () => openUserProfileModal(m.userId);
+
     const content = document.createElement('div');
     content.className = 'msg-content';
     content.innerHTML = `
       <div class="msg-header">
-        <span class="msg-author" style="color:${m.color}">${esc(m.username)}</span>
+        <span class="msg-author" style="color:${m.color || '#5865f2'};cursor:pointer" title="Ver perfil">${esc(disp)}</span>${tagHtml}
         <span class="msg-time">${fmtTime(m.ts)}</span>
       </div>
       <div class="msg-text">${mdLite(m.content)}</div>`;
+    content.querySelector('.msg-author').onclick = () => openUserProfileModal(m.userId);
     g.appendChild(av); g.appendChild(content);
     box.appendChild(g);
   } else {
@@ -755,14 +897,20 @@ function renderMemberList() {
 }
 function memberItem(m) {
   const div = document.createElement('div');
-  div.className = 'member-item' + (m.status === 'offline' ? ' offline' : '') + (m.id !== S.user.id ? ' clickable' : '');
+  div.className = 'member-item' + (m.status === 'offline' ? ' offline' : '') + ' clickable';
   const av = document.createElement('div');
   av.className = 'user-avatar'; av.style.width = av.style.height = '32px';
   setAvatar(av, m);
-  const nm = document.createElement('span');
-  nm.className = 'name'; nm.textContent = m.username; nm.style.color = m.color;
-  div.appendChild(av); div.appendChild(nm);
-  if (m.id !== S.user.id) div.onclick = () => startDmWith(m.id);
+  const dot = document.createElement('span');
+  dot.className = 'dot ' + (m.status || 'offline');
+  av.appendChild(dot);
+  const info = document.createElement('div');
+  info.className = 'member-info';
+  const disp = m.displayName || m.username;
+  const custom = m.customStatus ? `<small style="color:#00a8fc;font-size:10px;display:block">${esc(m.customStatus)}</small>` : '';
+  info.innerHTML = `<span style="font-weight:600">${esc(disp)}</span>${custom}`;
+  div.appendChild(av); div.appendChild(info);
+  div.onclick = () => openUserProfileModal(m.id);
   return div;
 }
 
@@ -1031,10 +1179,51 @@ function openVolumeModal(userId, username) {
   };
 }
 
-/* ---------- Voz / WebRTC / Compartilhamento de Tela ---------- */
+/* ---------- Voz / WebRTC / Compartilhamento de Tela & Call Timer ---------- */
 let localStream = null;
 let screenStream = null;
 const peers = {};   // userId -> RTCPeerConnection
+let voiceStartTime = null;
+let voiceTimerInterval = null;
+
+function startVoiceTimer() {
+  if (voiceTimerInterval) clearInterval(voiceTimerInterval);
+  voiceStartTime = Date.now();
+  updateVoiceTimerDisplay();
+  voiceTimerInterval = setInterval(updateVoiceTimerDisplay, 1000);
+}
+
+function stopVoiceTimer() {
+  if (voiceTimerInterval) {
+    clearInterval(voiceTimerInterval);
+    voiceTimerInterval = null;
+  }
+  voiceStartTime = null;
+  const vt = $('vrTimer');
+  if (vt) vt.textContent = '00:00';
+  const ctb = document.querySelector('.call-time-badge');
+  if (ctb) ctb.textContent = '00:00';
+}
+
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const pad = n => String(n).padStart(2, '0');
+  if (hrs > 0) return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+  return `${pad(mins)}:${pad(secs)}`;
+}
+
+function updateVoiceTimerDisplay() {
+  if (!voiceStartTime) return;
+  const elapsed = (Date.now() - voiceStartTime) / 1000;
+  const text = formatDuration(elapsed);
+  const vrTimer = $('vrTimer');
+  if (vrTimer) vrTimer.textContent = text;
+  const callTimeBadge = document.querySelector('.call-time-badge');
+  if (callTimeBadge) callTimeBadge.textContent = text;
+}
 
 async function joinVoice(serverId, channelId) {
   try {
@@ -1043,6 +1232,7 @@ async function joinVoice(serverId, channelId) {
     S.muted = false;
     S.deafened = false;
     S.screenSharing = false;
+    startVoiceTimer();
     updateVoiceButtons();
     updateVoiceBar(serverId, channelId);
     renderVoiceRoom();
@@ -1054,6 +1244,7 @@ async function joinVoice(serverId, channelId) {
 
 function leaveVoice() {
   stopScreenShare(false);
+  stopVoiceTimer();
   Object.values(peers).forEach(pc => pc.close());
   for (const k of Object.keys(peers)) delete peers[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
@@ -1200,10 +1391,14 @@ function updateVoiceBar(serverId, channelId) {
   if (!S.voice) return;
   const srv = S.servers.find(s => s.id === serverId);
   const ch = srv && srv.channels.find(c => c.id === channelId);
+  const timeText = voiceStartTime ? formatDuration((Date.now() - voiceStartTime) / 1000) : '00:00';
   const bar = document.createElement('div');
   bar.className = 'call-bar';
   bar.innerHTML = `
-    <div class="call-info" style="cursor:pointer" id="cbInfo" title="Clique para abrir a tela da call">🔊 Conectado — ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
+    <div class="call-info-row" id="cbInfo" title="Clique para abrir a tela da call">
+      <div class="call-info">🔊 ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
+      <span class="call-time-badge">${timeText}</span>
+    </div>
     <div class="call-btns">
       <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${S.muted ? '🔇 Mudo' : '🎙️ Falando'}</button>
       <button class="call-btn${S.deafened ? ' on' : ''}" id="cbDeafen">${S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Ouvindo'}</button>
@@ -1239,6 +1434,12 @@ function updateVoiceControls() {
 if ($('vrBtnMute')) $('vrBtnMute').onclick = toggleMute;
 if ($('vrBtnDeafen')) $('vrBtnDeafen').onclick = toggleDeafen;
 if ($('vrBtnScreen')) $('vrBtnScreen').onclick = toggleScreenShare;
+if ($('btnVrFullscreen')) {
+  $('btnVrFullscreen').onclick = () => {
+    const stage = $('voiceRoomStage');
+    if (stage) toggleFullscreen(stage);
+  };
+}
 if ($('vrBtnChat')) {
   $('vrBtnChat').onclick = () => {
     const srv = currentServer();
@@ -1266,8 +1467,14 @@ function renderVoiceRoom() {
 
   const srvId = S.voice ? S.voice.serverId : S.view;
   const chId = S.voice ? S.voice.channelId : S.channelId;
-  const users = ((S.voiceStates[srvId] || {})[chId]) || [];
+  const srv = S.servers.find(s => s.id === srvId);
+  const ch = srv && srv.channels.find(c => c.id === chId);
 
+  if ($('vrChanTitle')) {
+    $('vrChanTitle').textContent = `🔊 ${srv ? srv.name : ''} / ${ch ? ch.name : 'Chamada'}`;
+  }
+
+  const users = ((S.voiceStates[srvId] || {})[chId]) || [];
   const hasAnyScreen = S.screenSharing || users.some(u => u.screenSharing);
 
   const grid = document.createElement('div');
@@ -1291,10 +1498,18 @@ function renderVoiceRoom() {
     hint.textContent = '⛶ Duplo clique para Tela Cheia';
     myTile.appendChild(hint);
   } else {
+    const myDispName = S.user?.displayName || S.user?.username || 'Você';
+    const myTag = `@${S.user?.username || ''}`;
+    const myCustom = S.user?.customStatus ? `<span class="vr-user-status">${esc(S.user.customStatus)}</span>` : '';
+    
     myTile.innerHTML = `
       <div class="vr-tile-avatar">
-        <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${(S.user?.username || '?')[0].toUpperCase()}</div>
-        <span style="font-weight:600;font-size:15px;color:var(--header)">${esc(S.user?.username || 'Você')}</span>
+        <div class="user-avatar" style="background:${S.user?.color || '#5865f2'}">${S.user?.avatar || (myDispName || S.user?.username || '?')[0].toUpperCase()}</div>
+        <div class="vr-user-name-box">
+          <span class="vr-display-name">${esc(myDispName)} (Você)</span>
+          <span class="vr-user-tag">${esc(myTag)}</span>
+          ${myCustom}
+        </div>
       </div>
     `;
   }
@@ -1302,7 +1517,7 @@ function renderVoiceRoom() {
   const myOverlay = document.createElement('div');
   myOverlay.className = 'vr-tile-overlay';
   myOverlay.innerHTML = `
-    <span>${esc(S.user?.username || 'Você')} (Você)${S.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+    <span>${esc(S.user?.displayName || S.user?.username || 'Você')} (Você)${S.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
     <div class="vr-actions">
       <span>${S.deafened ? '🎧🔇' : (S.muted ? '🔇' : '🎙️')}</span>
       ${S.screenSharing ? `<button class="vr-action-btn" id="myFsBtn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
@@ -1338,10 +1553,18 @@ function renderVoiceRoom() {
       hint.textContent = '⛶ Duplo clique para Tela Cheia';
       tile.appendChild(hint);
     } else {
+      const uDispName = u.displayName || u.username;
+      const uTag = `@${u.username}`;
+      const uCustom = u.customStatus ? `<span class="vr-user-status">${esc(u.customStatus)}</span>` : '';
+      
       tile.innerHTML = `
-        <div class="vr-tile-avatar">
-          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${(u.username || '?')[0].toUpperCase()}</div>
-          <span style="font-weight:600;font-size:15px;color:var(--header)">${esc(u.username)}</span>
+        <div class="vr-tile-avatar" style="cursor:pointer" onclick="openUserProfileModal('${u.id}')">
+          <div class="user-avatar" style="background:${u.color || '#5865f2'}">${u.avatar || (uDispName || u.username || '?')[0].toUpperCase()}</div>
+          <div class="vr-user-name-box">
+            <span class="vr-display-name">${esc(uDispName)}</span>
+            <span class="vr-user-tag">${esc(uTag)}</span>
+            ${uCustom}
+          </div>
         </div>
       `;
     }
@@ -1349,7 +1572,7 @@ function renderVoiceRoom() {
     const overlay = document.createElement('div');
     overlay.className = 'vr-tile-overlay';
     overlay.innerHTML = `
-      <span>${esc(u.username)}${u.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
+      <span style="cursor:pointer" onclick="openUserProfileModal('${u.id}')">${esc(u.displayName || u.username)}${u.screenSharing ? ' <span class="badge-live">AO VIVO</span>' : ''}</span>
       <div class="vr-actions">
         <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
         <button class="vr-action-btn vr-vol-btn" title="Ajustar Volume">🔊 ${getUserVolume(u.id)}%</button>
@@ -1358,7 +1581,7 @@ function renderVoiceRoom() {
     `;
 
     const volBtn = overlay.querySelector('.vr-vol-btn');
-    if (volBtn) volBtn.onclick = (e) => { e.stopPropagation(); openVolumeModal(u.id, u.username); };
+    if (volBtn) volBtn.onclick = (e) => { e.stopPropagation(); openVolumeModal(u.id, u.displayName || u.username); };
 
     const fsBtn = overlay.querySelector('.vr-fs-btn');
     if (fsBtn) {
