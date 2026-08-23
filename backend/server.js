@@ -6,6 +6,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, 'db.json');
+const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 
 // ---------- Persistência ----------
 let db = load();
@@ -115,13 +116,16 @@ const wss = new WebSocketServer({ server: http.createServer((req, res) => {
   // Servir arquivos estáticos
   let p = req.url.split('?')[0];
   if (p === '/') p = '/index.html';
-  const file = path.join(__dirname, 'public', path.normalize(p).replace(/^([/\\])+/, ''));
-  if (!file.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); res.end(); return; }
+  const file = path.join(FRONTEND_DIR, path.normalize(p).replace(/^([/\\])+/, ''));
+  if (!file.startsWith(FRONTEND_DIR)) { res.writeHead(403); res.end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext = path.extname(file);
     const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
-    res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': types[ext] || 'application/octet-stream',
+      'Access-Control-Allow-Origin': '*'
+    });
     res.end(data);
   });
 }).listen(PORT, () => console.log(`JohnCord rodando em http://localhost:${PORT}`)) });

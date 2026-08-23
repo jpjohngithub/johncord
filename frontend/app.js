@@ -1,7 +1,10 @@
 /* ============ JohnCord - Cliente ============ */
 'use strict';
 
-const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+const BACKEND = window.JOHNCORD_BACKEND || '';
+const wsUrl = BACKEND
+  ? BACKEND.replace(/^http/, 'ws')
+  : (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
 let ws;
 let lastAuth = null;
 

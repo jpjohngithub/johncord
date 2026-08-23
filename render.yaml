@@ -1,8 +1,13 @@
 services:
   - type: web
-    name: johncord
+    name: johncord-backend
     runtime: node
+    rootDir: backend
     plan: free
+    autoDeploy: true
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production

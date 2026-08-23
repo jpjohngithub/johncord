@@ -1,0 +1,15 @@
+# Netlify - frontend do JohnCord
+[build]
+  publish = "frontend"
+
+# Headers de seguranca basica
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+
+# Redireciona tudo para index.html (SPA)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
