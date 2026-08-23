@@ -419,14 +419,36 @@ function openDm(dmId) {
 function currentServer() { return S.servers.find(s => s.id === S.view); }
 
 /* ---------- Render ---------- */
+function isImgUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/');
+}
+
 function setAvatar(el, user) {
   if (!el || !user) return;
-  if (user.avatar) {
-    el.textContent = user.avatar;
+  const av = user.avatar;
+  const disp = user.displayName || user.username || '?';
+  if (isImgUrl(av)) {
+    el.innerHTML = `<img src="${esc(av)}" alt="Avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block;pointer-events:none">`;
+    el.style.background = 'transparent';
+  } else if (av) {
+    el.textContent = av;
+    el.style.background = user.color || '#5865f2';
   } else {
-    el.textContent = (user.username || '?')[0].toUpperCase();
+    el.textContent = disp[0].toUpperCase();
+    el.style.background = user.color || '#5865f2';
   }
-  el.style.background = user.color || '#5865f2';
+}
+
+function setBanner(el, bannerVal) {
+  if (!el) return;
+  const val = (bannerVal || '#5865f2').trim();
+  if (isImgUrl(val)) {
+    el.style.background = `url("${esc(val)}") center/cover no-repeat`;
+  } else {
+    el.style.background = val;
+  }
 }
 
 function modalEditProfile() {
@@ -444,16 +466,14 @@ function modalEditProfile() {
 
   openModal(`
     <h2>🎨 Personalizar Perfil</h2>
-    <p>Edite seu nome de exibição, sobre mim, avatar, banner e status:</p>
+    <p>Edite sua foto (URL ou emoji), banner, nome de exibição, sobre mim e status:</p>
 
     <!-- PREVIEW AO VIVO DO CARD -->
     <div class="profile-card-box" style="margin-bottom:16px;border:1px solid rgba(255,255,255,.1)">
-      <div class="profile-card-banner" id="pPrevBanner" style="background:${selectedBannerColor}"></div>
+      <div class="profile-card-banner" id="pPrevBanner"></div>
       <div class="profile-card-body">
         <div class="profile-avatar-row">
-          <div class="profile-avatar-large" id="pPrevAvatar" style="background:${selectedColor}">
-            ${selectedAvatar || (selectedDisplayName || S.user.username || '?')[0].toUpperCase()}
-          </div>
+          <div class="profile-avatar-large" id="pPrevAvatar"></div>
         </div>
         <div class="profile-card-names">
           <div class="profile-display-title" id="pPrevDisplay">${esc(selectedDisplayName)}</div>
@@ -477,6 +497,17 @@ function modalEditProfile() {
       </div>
 
       <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">FOTO DE PERFIL (LINK / URL DA IMAGEM):</label>
+        <input class="input" id="mAvatarUrl" placeholder="Cole aqui o link da imagem (ex: https://...)" value="${isImgUrl(selectedAvatar) ? esc(selectedAvatar) : ''}">
+        <span style="font-size:11px;color:var(--text-dim)">Você pode colar qualquer link de imagem ou escolher um emoji abaixo.</span>
+      </div>
+
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">BANNER DO PERFIL (COR OU LINK / URL DA IMAGEM):</label>
+        <input class="input" id="mBannerUrl" placeholder="Cole aqui a cor (#5865f2) ou link de imagem (https://...)" value="${esc(selectedBannerColor)}">
+      </div>
+
+      <div>
         <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">SOBRE MIM (BIO):</label>
         <textarea class="input" id="mBio" rows="2" placeholder="Escreva um pouco sobre você..." maxlength="200" style="resize:vertical">${esc(selectedBio)}</textarea>
       </div>
@@ -487,14 +518,14 @@ function modalEditProfile() {
       </div>
 
       <div>
-        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO BANNER DO PERFIL:</label>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR RÁPIDA DO BANNER:</label>
         <div style="display:flex;flex-wrap:wrap;gap:8px" id="bannerPickerBox">
           ${bannerColors.map(c => `<div class="color-dot${c === selectedBannerColor ? ' active' : ''}" data-bcolor="${c}" style="width:26px;height:26px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c === selectedBannerColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
         </div>
       </div>
 
       <div>
-        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO AVATAR:</label>
+        <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">COR DO AVATAR (SE NÃO USAR FOTO):</label>
         <div style="display:flex;flex-wrap:wrap;gap:8px" id="colorPickerBox">
           ${avatarColors.map(c => `<div class="color-dot${c === selectedColor ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${c === selectedColor ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
         </div>
@@ -521,9 +552,26 @@ function modalEditProfile() {
   const prevBio = $('pPrevBio');
   const prevSt = $('pPrevStatusText');
 
+  function updatePreview() {
+    setBanner(prevBanner, selectedBannerColor);
+    setAvatar(prevAv, { avatar: selectedAvatar, color: selectedColor, displayName: selectedDisplayName, username: S.user.username });
+  }
+  updatePreview();
+
   $('mDisplayName').oninput = e => {
     selectedDisplayName = e.target.value.trim() || S.user.username;
     prevDisp.textContent = selectedDisplayName;
+    updatePreview();
+  };
+
+  $('mAvatarUrl').oninput = e => {
+    selectedAvatar = e.target.value.trim();
+    updatePreview();
+  };
+
+  $('mBannerUrl').oninput = e => {
+    selectedBannerColor = e.target.value.trim() || '#5865f2';
+    updatePreview();
   };
 
   $('mBio').oninput = e => {
@@ -539,9 +587,10 @@ function modalEditProfile() {
   document.querySelectorAll('#bannerPickerBox .color-dot').forEach(dot => {
     dot.onclick = () => {
       selectedBannerColor = dot.dataset.bcolor;
+      $('mBannerUrl').value = selectedBannerColor;
       document.querySelectorAll('#bannerPickerBox .color-dot').forEach(d => d.style.borderColor = 'transparent');
       dot.style.borderColor = '#fff';
-      prevBanner.style.background = selectedBannerColor;
+      updatePreview();
     };
   });
 
@@ -550,33 +599,38 @@ function modalEditProfile() {
       selectedColor = dot.dataset.color;
       document.querySelectorAll('#colorPickerBox .color-dot').forEach(d => d.style.borderColor = 'transparent');
       dot.style.borderColor = '#fff';
-      prevAv.style.background = selectedColor;
+      updatePreview();
     };
   });
 
   document.querySelectorAll('#emojiPickerBox .emoji-opt-btn').forEach(btn => {
     btn.onclick = () => {
       selectedAvatar = btn.dataset.emoji;
-      prevAv.textContent = selectedAvatar;
+      $('mAvatarUrl').value = '';
+      updatePreview();
     };
   });
 
   $('btnDefaultLetter').onclick = () => {
     selectedAvatar = '';
-    prevAv.textContent = (selectedDisplayName || S.user.username || '?')[0].toUpperCase();
+    $('mAvatarUrl').value = '';
+    updatePreview();
   };
 
   $('mSaveProfile').onclick = () => {
     const disp = $('mDisplayName').value.trim() || S.user.username;
     const bioVal = $('mBio').value;
     const statusVal = $('mCustomStatus').value.trim();
+    const finalAvatar = $('mAvatarUrl').value.trim() || selectedAvatar;
+    const finalBanner = $('mBannerUrl').value.trim() || selectedBannerColor;
+
     send({
       t: 'updateProfile',
       displayName: disp,
       bio: bioVal,
-      bannerColor: selectedBannerColor,
+      bannerColor: finalBanner,
       color: selectedColor,
-      avatar: selectedAvatar,
+      avatar: finalAvatar,
       customStatus: statusVal
     });
     closeModal();
@@ -593,8 +647,6 @@ function openUserProfileModal(userId) {
   const isFriend = (S.friends || []).some(f => f.id === userId);
   const dispName = u.displayName || u.username;
   const bannerColor = u.bannerColor || '#5865f2';
-  const avatarBg = u.color || '#5865f2';
-  const avatarContent = u.avatar || (dispName || u.username || '?')[0].toUpperCase();
   const bioText = u.bio || 'Este usuário ainda não escreveu nada sobre ele.';
   const statusText = u.customStatus || (u.status === 'online' ? '🟢 Online' : '⚪ Offline');
 
@@ -616,10 +668,10 @@ function openUserProfileModal(userId) {
 
   openModal(`
     <div class="profile-card-box">
-      <div class="profile-card-banner" style="background:${bannerColor}"></div>
+      <div class="profile-card-banner" id="pUserModalBanner"></div>
       <div class="profile-card-body">
         <div class="profile-avatar-row">
-          <div class="profile-avatar-large" style="background:${avatarBg}">${avatarContent}</div>
+          <div class="profile-avatar-large" id="pUserModalAvatar"></div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary btn-small" id="pmBtnDm">💬 Mensagem</button>
             ${!isFriend ? `<button class="btn btn-ghost btn-small" id="pmBtnAdd">👥 Adicionar</button>` : ''}
@@ -643,6 +695,9 @@ function openUserProfileModal(userId) {
       </div>
     </div>
   `);
+
+  setBanner($('pUserModalBanner'), bannerColor);
+  setAvatar($('pUserModalAvatar'), u);
 
   const dmBtn = $('pmBtnDm');
   if (dmBtn) {
@@ -673,7 +728,10 @@ function renderRail() {
     const div = document.createElement('div');
     div.className = 'server-icon' + (srv.permanent ? ' permanent' : '') + (S.view === srv.id ? ' active' : '');
     div.title = srv.name;
-    div.innerHTML = `<span class="pill"></span>${srv.icon}`;
+    const iconContent = isImgUrl(srv.icon)
+      ? `<img src="${esc(srv.icon)}" alt="Icon" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+      : (srv.icon || srv.name[0].toUpperCase());
+    div.innerHTML = `<span class="pill"></span>${iconContent}`;
     div.onclick = () => openServer(srv.id);
     list.appendChild(div);
   });
@@ -873,8 +931,7 @@ function appendMsg(m) {
     g.className = 'msg-group';
     const av = document.createElement('div');
     av.className = 'm-avatar';
-    av.style.background = m.color || '#5865f2';
-    av.textContent = avContent;
+    setAvatar(av, { avatar: m.avatar, color: m.color, displayName: disp, username: m.username });
     av.style.cursor = 'pointer';
     av.title = 'Ver perfil';
     av.onclick = () => openUserProfileModal(m.userId);
@@ -1129,7 +1186,7 @@ $('btnAddServer').onclick = () => {
     <p>Crie um espaço personalizado para você e seus amigos conversarem, transmitirem e jogarem juntos!</p>
     
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:10px">
-      <div id="mPrevSrvIcon" style="width:52px;height:52px;border-radius:14px;background:#2b2d31;font-size:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.3)">
+      <div id="mPrevSrvIcon" style="width:52px;height:52px;border-radius:14px;background:#2b2d31;font-size:28px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.3);overflow:hidden">
         🎮
       </div>
       <div>
@@ -1141,7 +1198,10 @@ $('btnAddServer').onclick = () => {
     <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO SERVIDOR:</label>
     <input class="input" id="mSrvName" placeholder="Ex: Clube dos Gamers" maxlength="30" value="Meu Servidor">
 
-    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">ÍCONE / FOTO DO SERVIDOR:</label>
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">FOTO / ÍCONE DO SERVIDOR (LINK / URL):</label>
+    <input class="input" id="mSrvIconUrl" placeholder="Cole aqui o link da imagem (ex: https://...)">
+    <span style="font-size:11px;color:var(--text-dim);display:block;margin-top:-6px;margin-bottom:10px">Você pode colar uma URL de imagem ou escolher um emoji abaixo:</span>
+
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px" id="srvEmojiPicker">
       ${emojis.map(em => `<button class="emoji-opt-btn" data-emoji="${em}" style="font-size:18px;background:#2b2d31;border:none;border-radius:6px;padding:4px 8px;cursor:pointer">${em}</button>`).join('')}
     </div>
@@ -1160,14 +1220,28 @@ $('btnAddServer').onclick = () => {
   const prevIcon = $('mPrevSrvIcon');
   const prevName = $('mPrevSrvName');
 
+  function updateIconPreview() {
+    if (isImgUrl(selectedIcon)) {
+      prevIcon.innerHTML = `<img src="${esc(selectedIcon)}" alt="Icon" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+    } else {
+      prevIcon.textContent = selectedIcon;
+    }
+  }
+
   $('mSrvName').oninput = e => {
     prevName.textContent = e.target.value || 'Meu Servidor';
+  };
+
+  $('mSrvIconUrl').oninput = e => {
+    selectedIcon = e.target.value.trim() || '🎮';
+    updateIconPreview();
   };
 
   document.querySelectorAll('#srvEmojiPicker .emoji-opt-btn').forEach(btn => {
     btn.onclick = () => {
       selectedIcon = btn.dataset.emoji;
-      prevIcon.textContent = selectedIcon;
+      $('mSrvIconUrl').value = '';
+      updateIconPreview();
     };
   });
 
@@ -1234,10 +1308,14 @@ function modalServerManage(serverId, initialTab = 'overview') {
     let bodyHtml = '';
 
     if (activeTab === 'overview') {
+      const srvIconPreview = isImgUrl(icon)
+        ? `<img src="${esc(icon)}" alt="Icon" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+        : icon;
+
       bodyHtml = `
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;background:#1e1f22;padding:12px;border-radius:10px">
-          <div style="width:50px;height:50px;border-radius:12px;background:#2b2d31;font-size:26px;display:flex;align-items:center;justify-content:center">
-            ${icon}
+          <div style="width:50px;height:50px;border-radius:12px;background:#2b2d31;font-size:26px;display:flex;align-items:center;justify-content:center;overflow:hidden">
+            ${srvIconPreview}
           </div>
           <div>
             <div style="font-weight:800;font-size:17px;color:var(--header)">${esc(srv.name)}</div>
@@ -1249,8 +1327,11 @@ function modalServerManage(serverId, initialTab = 'overview') {
           <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO SERVIDOR:</label>
           <input class="input" id="smSrvName" value="${esc(srv.name)}" maxlength="30">
 
-          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">ÍCONE / EMOJI:</label>
-          <input class="input" id="smSrvIcon" value="${esc(icon)}" maxlength="10">
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">ÍCONE / FOTO DO SERVIDOR (EMOJI OU LINK / URL):</label>
+          <input class="input" id="smSrvIcon" value="${esc(icon)}" placeholder="Emoji ou link https://...">
+
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">COR OU URL DO BANNER:</label>
+          <input class="input" id="smSrvBanner" value="${esc(bannerColor)}" placeholder="Cor #5865f2 ou link https://...">
 
           <div class="modal-actions" style="margin-top:14px">
             ${isOwner ? `<button class="btn btn-danger" id="smBtnDeleteSrv">🗑️ Excluir Servidor</button>` : ''}
@@ -2322,13 +2403,30 @@ function getPeer(peerId, initiator) {
         audio = document.createElement('audio');
         audio.id = 'audio-' + peerId;
         audio.autoplay = true;
-        audio.className = 'remote-audio';
+        audio.playsInline = true;
+        audio.style.position = 'fixed';
+        audio.style.top = '-9999px';
+        audio.style.left = '-9999px';
+        audio.style.opacity = '0';
+        audio.style.pointerEvents = 'none';
         document.body.appendChild(audio);
       }
       audio.srcObject = stream;
       audio.muted = S.deafened;
-      audio.volume = S.deafened ? 0 : Math.min(1, getUserVolume(peerId) / 100);
-      audio.play().catch(() => {});
+      audio.volume = S.deafened ? 0 : Math.min(1, Math.max(0, getUserVolume(peerId) / 100));
+      
+      const tryPlayAudio = () => {
+        audio.play().catch(() => {
+          const unlock = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener('click', unlock);
+            document.removeEventListener('keydown', unlock);
+          };
+          document.addEventListener('click', unlock, { once: true });
+          document.addEventListener('keydown', unlock, { once: true });
+        });
+      };
+      tryPlayAudio();
     }
   };
   
@@ -2338,6 +2436,12 @@ function getPeer(peerId, initiator) {
 
 async function createOffer(pc, peerId) {
   try {
+    if (localStream) {
+      const senders = pc.getSenders().map(s => s.track);
+      localStream.getTracks().forEach(t => {
+        if (!senders.includes(t)) pc.addTrack(t, localStream);
+      });
+    }
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
     send({ t: 'signal', to: peerId, data: { type: 'offer', sdp: pc.localDescription } });
@@ -2361,7 +2465,7 @@ function syncVoicePeers() {
     }
   }
   inChan.forEach(pid => {
-    if (!peers[pid] && S.user?.id > pid) getPeer(pid, true);
+    if (!peers[pid]) getPeer(pid, S.user?.id > pid);
   });
   renderVoiceRoom();
 }
@@ -2370,6 +2474,12 @@ async function handleSignal(from, data) {
   const pc = getPeer(from, false);
   try {
     if (data.type === 'offer') {
+      if (localStream) {
+        const senders = pc.getSenders().map(s => s.track);
+        localStream.getTracks().forEach(t => {
+          if (!senders.includes(t)) pc.addTrack(t, localStream);
+        });
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
