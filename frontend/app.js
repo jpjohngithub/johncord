@@ -1949,6 +1949,7 @@ function openVolumeModal(userId, username) {
 let localStream = null;
 let screenStream = null;
 const peers = {};               // userId -> RTCPeerConnection
+const peerAudioStreams = {};    // userId -> MediaStream com todas as faixas de audio recebidas
 const pendingCandidates = {};   // userId -> Array of RTCIceCandidateInit
 let voiceStartTime = null;
 let voiceTimerInterval = null;
@@ -2234,8 +2235,10 @@ async function toggleScreenShare() {
     S.screenSharing = true;
     send({ t: 'voiceScreen', screenSharing: true });
 
+    // Envia APENAS o video da tela - o audio da tela sobrescreveria a voz
+    // de quem assiste (o microfone continua sendo transmitido separadamente)
     for (const [pid, pc] of Object.entries(peers)) {
-      screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
+      screenStream.getVideoTracks().forEach(t => pc.addTrack(t, screenStream));
       makeOffer(pc, pid);
     }
 
@@ -2780,6 +2783,12 @@ function getPeer(peerId, initiator) {
       };
       renderVoiceRoom();
     } else {
+      // Acumula faixas de audio do peer (voz + possiveis novas fontes)
+      // sem sobrescrever o que ja estava tocando
+      if (!peerAudioStreams[peerId]) peerAudioStreams[peerId] = new MediaStream();
+      if (!peerAudioStreams[peerId].getTracks().includes(e.track)) {
+        peerAudioStreams[peerId].addTrack(e.track);
+      }
       let audio = document.getElementById('audio-' + peerId);
       if (!audio) {
         audio = document.createElement('audio');
@@ -2794,7 +2803,7 @@ function getPeer(peerId, initiator) {
         audio.style.pointerEvents = 'none';
         document.body.appendChild(audio);
       }
-      audio.srcObject = stream;
+      audio.srcObject = peerAudioStreams[peerId];
       audio.muted = S.deafened;
       audio.volume = S.deafened ? 0 : Math.min(1, Math.max(0, getUserVolume(peerId) / 100));
 
@@ -2825,6 +2834,7 @@ function recreatePeer(peerId, initiator) {
     delete peers[peerId];
   }
   delete pendingCandidates[peerId];
+  delete peerAudioStreams[peerId];
   if (S.voice) {
     connStatus[peerId] = initiator ? 'retrying' : 'connecting';
     renderConnBadges();
@@ -2872,6 +2882,7 @@ function syncVoicePeers() {
       delete peers[pid];
       delete pendingCandidates[pid];
       delete connStatus[pid];
+      delete peerAudioStreams[pid];
       const a = document.getElementById('audio-' + pid);
       if (a) a.remove();
       const v = document.getElementById('video-' + pid);
