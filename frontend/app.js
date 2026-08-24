@@ -158,12 +158,31 @@ function handle(d) {
     case 'authErr': showAuthError(d.error); break;
     case 'err': toast('⚠ ' + d.error); break;
     case 'ok': toast('✓ ' + d.info); break;
-    case 'servers':
+    case 'servers': {
+      const prevServerId = S.view;
       S.servers = d.servers;
       renderRail();
-      renderSidebar();
-      if (d.openServer) openServer(d.openServer);
+      
+      if (d.openServer) {
+        openServer(d.openServer);
+      } else if (prevServerId && prevServerId !== 'home') {
+        const stillExists = S.servers.find(s => s.id === prevServerId);
+        if (stillExists) {
+          if (!stillExists.channels.some(c => c.id === S.channelId)) {
+            const firstText = stillExists.channels.find(c => c.type === 'text');
+            S.channelId = firstText ? firstText.id : (prevServerId === 'geral' ? 'geral-chat' : null);
+          }
+          renderSidebar();
+          renderHeader();
+          renderMessages();
+        } else {
+          openHome();
+        }
+      } else {
+        renderSidebar();
+      }
       break;
+    }
     case 'presence':
       S.presence = d.users;
       (S.friends || []).forEach(f => {
@@ -417,9 +436,18 @@ function openServer(id) {
   S.view = id;
   const srv = S.servers.find(s => s.id === id);
   if (!srv) return;
-  const firstText = srv.channels.find(c => c.type === 'text');
-  S.channelId = id === 'geral' ? 'geral-chat' : (firstText ? firstText.id : null);
+  
+  const textChannels = (srv.channels || []).filter(c => c.type === 'text');
+  const firstText = textChannels[0];
+  
+  if (id === 'geral') {
+    S.channelId = 'geral-chat';
+  } else {
+    S.channelId = firstText ? firstText.id : null;
+  }
+  
   S.dmId = null;
+  S.lastAuthor = null;
   
   if ($('chatView')) $('chatView').style.display = 'flex';
   if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
@@ -2122,26 +2150,9 @@ $('btnAddServer').onclick = () => {
   $('mCreate').onclick = () => {
     const name = $('mSrvName').value.trim();
     if (name.length >= 2) {
-      const tempId = 'temp_srv_' + Date.now();
-      const tempSrv = {
-        id: tempId,
-        name,
-        icon: selectedIcon,
-        banner: selectedBanner,
-        owner: S.user?.id,
-        channels: [
-          { id: 'ch_text_' + Date.now(), name: 'geral', type: 'text', messages: [] },
-          { id: 'ch_voice_' + Date.now(), name: 'Geral', type: 'voice' }
-        ],
-        roles: [],
-        members: [S.user?.id]
-      };
-      S.servers.push(tempSrv);
-      renderRail();
-      openServer(tempId);
       send({ t: 'createServer', name, icon: selectedIcon, banner: selectedBanner });
       closeModal();
-      toast('Servidor criado com sucesso!');
+      toast('Criando servidor...');
     }
   };
   $('mSrvName').focus();
