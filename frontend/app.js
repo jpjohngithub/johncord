@@ -268,6 +268,7 @@ function handle(d) {
       renderSidebar();
       break;
     case 'signal': handleSignal(d.from, d.data); break;
+    case 'voiceRelay': playRelayAudio(d.from, d.audio); break;
     case 'sessionReplaced':
       S.user = null;
       lastAuth = null;
@@ -2063,6 +2064,105 @@ function updateSpeakingUI(userId, speaking) {
   }
 }
 
+/* ---------- Fallback de audio via servidor (funciona em qualquer rede) ---------- */
+const RELAY_SAMPLE_RATE = 24000;
+let relaySendNode = null;
+let relaySendSrc = null;
+let relayMuteGain = null;
+const relayPlay = {}; // uid -> { queue:[], nextTime:0 }
+
+function u8ToB64(u8) {
+  let s = '';
+  const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  return btoa(s);
+}
+function b64ToU8(b64) {
+  const s = atob(b64);
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8;
+}
+
+function startRelaySender() {
+  if (!localStream || relaySendNode) return;
+  try {
+    unlockAudioContext();
+    if (!globalAudioCtx) return;
+    relaySendSrc = globalAudioCtx.createMediaStreamSource(localStream);
+    relaySendNode = globalAudioCtx.createScriptProcessor(4096, 1, 1);
+    relayMuteGain = globalAudioCtx.createGain();
+    relayMuteGain.gain.value = 0; // evita feedback: o node precisa estar conectado para rodar
+    relaySendNode.onaudioprocess = e => {
+      if (!S.voice || S.muted || !localStream) return;
+      // so envia por relay a quem o WebRTC ainda nao conectou
+      const targets = Object.entries(connStatus).filter(([pid, st]) => st !== 'connected').map(([pid]) => pid);
+      if (!targets.length) return;
+      const input = e.inputBuffer.getChannelData(0);
+      // downsample para 24kHz mono Int16
+      const ratio = input.length > 1 ? Math.max(1, Math.round(globalAudioCtx.sampleRate / RELAY_SAMPLE_RATE)) : 1;
+      const outLen = Math.floor(input.length / ratio);
+      const pcm = new Int16Array(outLen);
+      for (let i = 0; i < outLen; i++) {
+        let sum = 0;
+        for (let j = 0; j < ratio; j++) sum += input[i * ratio + j] || 0;
+        const v = Math.max(-1, Math.min(1, (sum / ratio) * 1.6));
+        pcm[i] = v < 0 ? v * 32768 : v * 32767;
+      }
+      const b64 = u8ToB64(new Uint8Array(pcm.buffer));
+      targets.forEach(pid => send({ t: 'voiceRelay', to: pid, audio: b64 }));
+    };
+    relaySendSrc.connect(relaySendNode);
+    relaySendNode.connect(relayMuteGain);
+    relayMuteGain.connect(globalAudioCtx.destination);
+  } catch (e) { console.warn('[voz] fallback de audio indisponivel', e); }
+}
+
+function stopRelaySender() {
+  try {
+    if (relaySendNode) { relaySendNode.disconnect(); relaySendNode.onaudioprocess = null; relaySendNode = null; }
+    if (relaySendSrc) { relaySendSrc.disconnect(); relaySendSrc = null; }
+    if (relayMuteGain) { relayMuteGain.disconnect(); relayMuteGain = null; }
+  } catch (e) {}
+  for (const k of Object.keys(relayPlay)) delete relayPlay[k];
+}
+
+function playRelayAudio(uid, audioB64) {
+  if (!S.voice || S.deafened) return;
+  // se o WebRTC direto ja conectou com essa pessoa, ignora o relay (evita som duplicado)
+  if (connStatus[uid] === 'connected') return;
+  unlockAudioContext();
+  if (!globalAudioCtx) return;
+  try {
+    let r = relayPlay[uid];
+    if (!r) r = relayPlay[uid] = { queue: [], nextTime: 0 };
+    const u8 = b64ToU8(audioB64);
+    const i16 = new Int16Array(u8.buffer);
+    if (r.queue.length > 25) r.queue.length = 0; // descarta atraso excessivo
+    r.queue.push(i16);
+
+    // agenda os buffers enfileirados de forma continua
+    while (r.queue.length) {
+      const now = globalAudioCtx.currentTime;
+      if (!r.nextTime || r.nextTime < now + 0.02) {
+        r.nextTime = now + 0.15; // jitter buffer de 150ms
+      }
+      const i16buf = r.queue.shift();
+      const f32 = new Float32Array(i16buf.length);
+      const vol = Math.min(2, Math.max(0, getUserVolume(uid) / 100)) * (S.deafened ? 0 : 1);
+      for (let i = 0; i < i16buf.length; i++) f32[i] = (i16buf[i] / 32768) * vol;
+      const buf = globalAudioCtx.createBuffer(1, f32.length, RELAY_SAMPLE_RATE);
+      buf.copyToChannel(f32, 0);
+      const src = globalAudioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(globalAudioCtx.destination);
+      src.start(r.nextTime);
+      r.nextTime += f32.length / RELAY_SAMPLE_RATE;
+      if (r.nextTime > now + 0.5) break; // nao acumula mais de ~500ms
+    }
+  } catch (e) {}
+}
+
 function startVoiceTimer() {
   if (voiceTimerInterval) clearInterval(voiceTimerInterval);
   voiceStartTime = Date.now();
@@ -2122,6 +2222,7 @@ async function joinVoice(serverId, channelId) {
     S.deafened = false;
     S.screenSharing = false;
     startVoiceTimer();
+    startRelaySender();
     updateVoiceButtons();
     updateVoiceBar(serverId, channelId);
     renderVoiceRoom();
@@ -2150,9 +2251,11 @@ function leaveVoice() {
   cleanupLocalVAD();
   stopScreenShare(false);
   stopVoiceTimer();
-  Object.values(peers).forEach(pc => pc.close());
+  stopRelaySender();
+  Object.values(peers).forEach(pc => { clearTimeout(pc._watchdog); pc.close(); });
   for (const k of Object.keys(peers)) delete peers[k];
   for (const k of Object.keys(pendingCandidates)) delete pendingCandidates[k];
+  for (const k of Object.keys(connStatus)) delete connStatus[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
   if (S.voice) { send({ t: 'voiceLeave' }); S.voice = null; }

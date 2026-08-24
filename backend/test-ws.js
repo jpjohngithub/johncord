@@ -170,6 +170,13 @@ function ok(name, cond) { console.log((cond ? 'PASS' : 'FAIL') + ' - ' + name); 
   await new Promise(r => setTimeout(r, 200));
   ok('colisao de oferta nao derruba o servidor nem as conexões', true);
 
+  // FALLBACK DE AUDIO: relay pelo servidor entre membros do mesmo canal de voz
+  const relayAudioP = waitMsg(b.ws, 'voiceRelay');
+  a.ws.send(JSON.stringify({ t: 'voiceRelay', to: bId, audio: btoa('pcm-fake') }));
+  const relayedAudio = await relayAudioP;
+  ok('audio relayado pelo servidor entregue ao membro da call',
+    relayedAudio.from === a.boot.user.id && relayedAudio.audio === btoa('pcm-fake'));
+
   // mute
   const vsMuteP = waitMsg(b.ws, 'voiceState');
   a.ws.send(JSON.stringify({ t: 'voiceMute', muted: true }));

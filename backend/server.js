@@ -667,6 +667,17 @@ wss.on('connection', (ws) => {
       if (v) { v.screenSharing = !!d.screenSharing; broadcastVoiceStates(); }
       return;
     }
+    // Fallback de audio: retransmite o microfone pelo servidor quando o WebRTC
+    // P2P nao conecta (NATs restritos / redes diferentes sem TURN)
+    if (d.t === 'voiceRelay') {
+      const mine = voice.get(me.id);
+      if (!mine) return;
+      const target = voice.get(d.to);
+      if (!target || target.serverId !== mine.serverId || target.channelId !== mine.channelId) return;
+      if (typeof d.audio !== 'string' || d.audio.length > 400000) return;
+      sendTo(d.to, { t: 'voiceRelay', from: me.id, audio: d.audio });
+      return;
+    }
     if (d.t === 'voiceSpeaking') {
       const v = voice.get(me.id);
       if (v) {
