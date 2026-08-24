@@ -241,6 +241,12 @@ function handle(d) {
     case 'searchResults':
       renderSearchResults(d.results);
       break;
+    case 'dmCallIncoming':
+      onIncomingDmCall(d.dmId, d.fromUser);
+      break;
+    case 'dmCallDeclined':
+      toast(`📵 ${d.fromUser ? (d.fromUser.displayName || d.fromUser.username) : 'O amigo'} recusou a chamada.`);
+      break;
     case 'relayed': handleDmRelay(d.from, d.payload); break;
     case 'inviteUpdated': {
       const srv = S.servers.find(s => s.id === d.serverId);
@@ -250,6 +256,7 @@ function handle(d) {
     case 'voiceState':
       S.voiceStates = d.states;
       renderSidebar();
+      renderHeader();
       renderVoiceRoom();
       syncVoicePeers();
       break;
@@ -794,8 +801,10 @@ function renderSidebar() {
       body.appendChild(sec);
       S.dmList.forEach(dm => {
         const item = document.createElement('div');
+        const inThisCall = (S.voiceStates['dm'] && S.voiceStates['dm'][dm.dmId] && S.voiceStates['dm'][dm.dmId].length > 0);
         item.className = 'chan-item' + (S.dmId === dm.dmId ? ' active' : '');
-        item.innerHTML = `<span>@</span><span>${esc(dm.user.username)}</span>`;
+        const badgeCall = inThisCall ? `<span class="badge-live-pulse" style="margin-left:auto;font-size:10px;padding:2px 6px">🔊 CALL</span>` : '';
+        item.innerHTML = `<span>@</span><span>${esc(dm.user.displayName || dm.user.username)}</span>${badgeCall}`;
         item.onclick = () => openDm(dm.dmId);
         body.appendChild(item);
       });
@@ -891,15 +900,28 @@ function renderHeader() {
       $('btnMembers').style.display = 'none';
       // Botao de ligar na chamada privada
       if (btnCall) {
-        const isFriend = S.friends.some(f => f.id === (dm && dm.user.id));
-        const inCall = S.dmCall && dm && S.dmCall.peerId === dm.user.id;
-        btnCall.style.display = isFriend ? '' : 'none';
-        btnCall.textContent = inCall ? '🔴 Na chamada' : '📞 Ligar';
-        btnCall.onclick = () => {
-          if (!dm) return;
-          if (inCall) endDmCall();
-          else startDmCall(dm.user.id);
-        };
+        btnCall.style.display = '';
+        const inThisDmVoice = S.voice && S.voice.serverId === 'dm' && S.voice.channelId === S.dmId;
+        const dmUsersInVoice = (S.voiceStates['dm'] && S.voiceStates['dm'][S.dmId]) || [];
+        if (inThisDmVoice) {
+          btnCall.innerHTML = '📞 Abrir Tela da Call';
+          btnCall.className = 'header-btn active-green';
+          btnCall.onclick = openVoiceRoomView;
+        } else if (dmUsersInVoice.length > 0) {
+          btnCall.innerHTML = '🟢 Entrar na Call';
+          btnCall.className = 'header-btn active-green';
+          btnCall.onclick = () => {
+            joinVoice('dm', S.dmId);
+            openVoiceRoomView();
+          };
+        } else {
+          btnCall.innerHTML = '📞 Iniciar Chamada';
+          btnCall.className = 'header-btn';
+          btnCall.onclick = () => {
+            joinVoice('dm', S.dmId);
+            openVoiceRoomView();
+          };
+        }
       }
     } else {
       $('chanIcon').textContent = '👥';
@@ -942,6 +964,29 @@ function renderDmMessages() {
   const box = $('messages');
   box.innerHTML = '';
   S.lastAuthor = null;
+
+  const dmVoiceUsers = (S.voiceStates['dm'] && S.voiceStates['dm'][S.dmId]) || [];
+  if (dmVoiceUsers.length > 0) {
+    const inCall = S.voice && S.voice.serverId === 'dm' && S.voice.channelId === S.dmId;
+    const banner = document.createElement('div');
+    banner.className = 'dm-voice-banner';
+    banner.style.cssText = 'background:rgba(35,165,90,0.15);border:1px solid #23a55a;border-radius:8px;padding:12px 16px;margin:8px 16px 16px;display:flex;align-items:center;justify-content:space-between;color:var(--header)';
+    banner.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="badge-live-pulse" style="font-size:12px;padding:3px 8px">📞 CALL ATIVA</span>
+        <span style="font-weight:600;font-size:14px">${dmVoiceUsers.length} ${dmVoiceUsers.length === 1 ? 'pessoa' : 'pessoas'} na chamada privada</span>
+      </div>
+      <div>
+        ${inCall ? '<button class="btn btn-primary" id="dmOpenCallBtn" style="background:#23a55a;padding:6px 14px">👁️ Abrir Tela da Call</button>' : '<button class="btn btn-primary" id="dmJoinCallBtn" style="background:#23a55a;padding:6px 14px">📞 Entrar na Call</button>'}
+      </div>
+    `;
+    const openBtn = banner.querySelector('#dmOpenCallBtn');
+    if (openBtn) openBtn.onclick = openVoiceRoomView;
+    const joinBtn = banner.querySelector('#dmJoinCallBtn');
+    if (joinBtn) joinBtn.onclick = () => { joinVoice('dm', S.dmId); openVoiceRoomView(); };
+    box.appendChild(banner);
+  }
+
   const dm = S.dms[S.dmId];
   const msgs = (dm && dm.messages) || [];
   const frag = document.createDocumentFragment();
@@ -2418,14 +2463,22 @@ function updateVoiceBar(serverId, channelId) {
   if (old) old.remove();
   $('btnDisconnectVoice').style.display = S.voice ? '' : 'none';
   if (!S.voice) return;
-  const srv = S.servers.find(s => s.id === serverId);
-  const ch = srv && srv.channels.find(c => c.id === channelId);
+  let callTitle = '';
+  if (serverId === 'dm') {
+    const dm = S.dmList.find(x => x.dmId === channelId);
+    const dmName = dm ? (dm.user.displayName || dm.user.username) : 'Amigo';
+    callTitle = `📞 Privado / @${esc(dmName)}`;
+  } else {
+    const srv = S.servers.find(s => s.id === serverId);
+    const ch = srv && srv.channels.find(c => c.id === channelId);
+    callTitle = `🔊 ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}`;
+  }
   const timeText = voiceStartTime ? formatDuration((Date.now() - voiceStartTime) / 1000) : '00:00';
   const bar = document.createElement('div');
   bar.className = 'call-bar';
   bar.innerHTML = `
     <div class="call-info-row" id="cbInfo" title="Clique para abrir a tela da call">
-      <div class="call-info">🔊 ${esc(srv ? srv.name : '')} / ${esc(ch ? ch.name : channelId || '')}</div>
+      <div class="call-info">${callTitle}</div>
       <span class="call-time-badge">${timeText}</span>
     </div>
     <div class="call-btns">
@@ -2471,12 +2524,16 @@ if ($('btnVrFullscreen')) {
 }
 if ($('vrBtnChat')) {
   $('vrBtnChat').onclick = () => {
-    const srv = currentServer();
-    const firstText = srv ? srv.channels.find(c => c.type === 'text') : null;
-    if (firstText) openChannel(firstText.id);
-    else {
-      if ($('chatView')) $('chatView').style.display = 'flex';
-      if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+    if (S.voice && S.voice.serverId === 'dm') {
+      openDm(S.voice.channelId);
+    } else {
+      const srv = currentServer();
+      const firstText = srv ? srv.channels.find(c => c.type === 'text') : null;
+      if (firstText) openChannel(firstText.id);
+      else {
+        if ($('chatView')) $('chatView').style.display = 'flex';
+        if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+      }
     }
   };
 }
@@ -2500,7 +2557,13 @@ function renderVoiceRoom() {
   const ch = srv && srv.channels.find(c => c.id === chId);
 
   if ($('vrChanTitle')) {
-    $('vrChanTitle').textContent = `🔊 ${srv ? srv.name : ''} / ${ch ? ch.name : 'Chamada'}`;
+    if (srvId === 'dm') {
+      const dm = S.dmList.find(x => x.dmId === chId);
+      const dmName = dm ? (dm.user.displayName || dm.user.username) : 'Amigo';
+      $('vrChanTitle').textContent = `📞 Chamada Privada — @${dmName}`;
+    } else {
+      $('vrChanTitle').textContent = `🔊 ${srv ? srv.name : ''} / ${ch ? ch.name : 'Chamada'}`;
+    }
   }
 
   const users = ((S.voiceStates[srvId] || {})[chId]) || [];
@@ -3121,229 +3184,43 @@ $('msgInput').addEventListener('input', function () {
   this.style.height = Math.min(this.scrollHeight, 160) + 'px';
 });
 
-/* ---------- Chamada privada (DM) ---------- */
-let dmLocalStream = null;
-let dmPc = null;
-let dmTimerInt = null;
-let incomingCallFrom = null;
+/* ---------- Chamada privada (DM) Unificada com Voice System ---------- */
+let dmCallTimeout = null;
 
-function relayTo(to, payload) { send({ t: 'relay', to, payload }); }
-
-async function startDmCall(userId) {
-  if (S.dmCall) return toast('⚠ Você já está em uma chamada. Desligue primeiro.');
-  const f = S.friends.find(x => x.id === userId);
-  if (!f) return;
-  if (f.status !== 'online') return toast('⚠ ' + (f.displayName || f.username) + ' está offline agora.');
-  try {
-    dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { return openMicHelpModal(); }
+function onIncomingDmCall(dmId, fromUser) {
+  if (S.voice) return; // Se já estiver em call, não interrompe
   unlockAudioContext();
-  S.dmCall = { peerId: userId, state: 'calling' };
-  showDmCallUI();
-  relayTo(userId, { type: 'dm-ring' });
-  S.dmCall.timeout = setTimeout(() => {
-    if (S.dmCall && S.dmCall.state === 'calling') { toast('⏱ Ninguém atendeu.'); cleanupDmCall(); }
-  }, 30000);
+  const name = fromUser ? (fromUser.displayName || fromUser.username) : 'Alguém';
+  openModal(`
+    <h2>📞 Ligação Privada Recebida</h2>
+    <div style="display:flex;align-items:center;gap:16px;margin:20px 0">
+      <div class="user-avatar" id="incAv" style="width:64px;height:64px;font-size:28px;border-radius:50%;box-shadow:0 0 0 3px #23a55a, 0 0 16px rgba(35,165,90,0.6)"></div>
+      <div>
+        <div style="font-size:18px;font-weight:700;color:var(--header)">${esc(name)}</div>
+        <div style="font-size:13px;color:var(--text-dim);margin-top:4px">está te chamando para uma conversa privada no PV</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="incDecline">✕ Recusar</button>
+      <button class="btn btn-primary" id="incAccept" style="background:#23a55a">📞 Atender Chamada</button>
+    </div>
+  `);
+  if ($('incAv') && fromUser) setAvatar($('incAv'), fromUser);
+  $('modalOverlay').onclick = null;
+  $('incAccept').onclick = () => {
+    closeModal();
+    openDm(dmId);
+    joinVoice('dm', dmId);
+    openVoiceRoomView();
+  };
+  $('incDecline').onclick = () => {
+    closeModal();
+    send({ t: 'dmCallDecline', dmId });
+  };
 }
 
 function handleDmRelay(from, p) {
-  if (!p || !p.type) return;
-  switch (p.type) {
-    case 'dm-ring': onIncomingCall(from); break;
-    case 'dm-accept': onDmCallAccepted(from); break;
-    case 'dm-decline': toast('📵 Chamada recusada.'); cleanupDmCall(); break;
-    case 'dm-busy': toast('⚠ A pessoa está em outra chamada.'); cleanupDmCall(); break;
-    case 'dm-end': toast('📞 Chamada encerrada.'); cleanupDmCall(); break;
-    case 'dm-offer': handleDmOffer(from, p.sdp); break;
-    case 'dm-answer': handleDmAnswer(from, p.sdp); break;
-    case 'dm-candidate':
-      if (dmPc && p.candidate) dmPc.addIceCandidate(new RTCIceCandidate(p.candidate)).catch(() => {});
-      break;
-  }
-}
-
-function onIncomingCall(from) {
-  if (S.dmCall) {
-    relayTo(from, { type: 'dm-busy' });
-    return;
-  }
-  incomingCallFrom = from;
-  const f = S.friends.find(x => x.id === from);
-  const name = f ? (f.displayName || f.username) : 'Alguém';
-  unlockAudioContext();
-  openModal(`
-    <h2>📞 Ligação recebida</h2>
-    <p><b>${esc(name)}</b> está te chamando no privado.</p>
-    <div class="modal-actions">
-      <button class="btn btn-danger" id="dcDecline">✕ Recusar</button>
-      <button class="btn btn-primary" id="dcAccept">📞 Aceitar</button>
-    </div>`);
-  $('modalOverlay').onclick = null; // nao fechar clicando fora durante chamada
-  $('dcAccept').onclick = acceptDmCall;
-  $('dcDecline').onclick = declineDmCall;
-  // auto-recusar apos 30s
-  setTimeout(() => { if (incomingCallFrom === from && !S.dmCall) closeModal(); }, 30000);
-}
-
-async function acceptDmCall() {
-  const from = incomingCallFrom;
-  incomingCallFrom = null;
-  closeModal();
-  if (!from) return;
-  try {
-    dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) {
-    relayTo(from, { type: 'dm-decline' });
-    openMicHelpModal();
-  }
-  S.dmCall = { peerId: from, state: 'active', startedAt: Date.now() };
-  relayTo(from, { type: 'dm-accept' });
-  showDmCallUI();
-}
-
-function declineDmCall() {
-  const from = incomingCallFrom;
-  incomingCallFrom = null;
-  closeModal();
-  if (from) relayTo(from, { type: 'dm-decline' });
-}
-
-function onDmCallAccepted(from) {
-  if (!S.dmCall || S.dmCall.peerId !== from) return;
-  clearTimeout(S.dmCall.timeout);
-  S.dmCall.state = 'active';
-  S.dmCall.startedAt = Date.now();
-  createDmPc(from, true);
-  updateDmCallUI();
-}
-
-function createDmPc(peerId, initiator) {
-  if (dmPc) return dmPc;
-  dmPc = new RTCPeerConnection({ iceServers: buildIceServers() });
-  dmLocalStream.getTracks().forEach(t => dmPc.addTrack(t, dmLocalStream));
-  dmPc.onicecandidate = e => {
-    if (e.candidate) relayTo(peerId, { type: 'dm-candidate', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });
-  };
-  dmPc.ontrack = e => {
-    let audio = document.getElementById('dm-call-audio');
-    if (!audio) {
-      audio = document.createElement('audio');
-      audio.id = 'dm-call-audio';
-      audio.autoplay = true;
-      audio.className = 'remote-audio';
-      document.body.appendChild(audio);
-    }
-    audio.srcObject = e.streams[0] || new MediaStream([e.track]);
-    audio.muted = S.deafened;
-    audio.volume = S.deafened ? 0 : 1;
-    const play = () => audio.play().catch(() => {});
-    play();
-    document.addEventListener('click', play, { once: true });
-  };
-  dmPc.onconnectionstatechange = () => {
-    if (dmPc.connectionState === 'failed') { toast('⚠ Conexão da chamada falhou.'); endDmCall(); }
-    if (dmPc.connectionState === 'disconnected') setTimeout(() => { if (dmPc && dmPc.connectionState === 'disconnected') endDmCall(); }, 4000);
-  };
-  if (initiator) {
-    dmPc.createOffer()
-      .then(o => dmPc.setLocalDescription(o))
-      .then(() => relayTo(peerId, { type: 'dm-offer', sdp: dmPc.localDescription }))
-      .catch(() => {});
-  }
-  return dmPc;
-}
-
-async function handleDmOffer(from, sdp) {
-  // se estamos chamando e a pessoa aceitou mas ofereceu antes: aceita a oferta dela
-  createDmPc(from, false);
-  try {
-    await dmPc.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await dmPc.createAnswer();
-    await dmPc.setLocalDescription(answer);
-    relayTo(from, { type: 'dm-answer', sdp: dmPc.localDescription });
-    if (S.dmCall && S.dmCall.state !== 'active') { S.dmCall.state = 'active'; S.dmCall.startedAt = Date.now(); updateDmCallUI(); }
-  } catch (e) {}
-}
-
-async function handleDmAnswer(from, sdp) {
-  if (!dmPc) return;
-  try {
-    if (dmPc.signalingState !== 'stable') {
-      await dmPc.setRemoteDescription(new RTCSessionDescription(sdp));
-    }
-  } catch (e) {}
-}
-
-function endDmCall(silent) {
-  if (S.dmCall) relayTo(S.dmCall.peerId, { type: 'dm-end' });
-  cleanupDmCall(silent);
-}
-
-function cleanupDmCall(silent) {
-  clearTimeout(S.dmCall && S.dmCall.timeout);
-  if (dmPc) { try { dmPc.close(); } catch (e) {} dmPc = null; }
-  if (dmLocalStream) { dmLocalStream.getTracks().forEach(t => t.stop()); dmLocalStream = null; }
-  const a = document.getElementById('dm-call-audio');
-  if (a) a.remove();
-  clearInterval(dmTimerInt);
-  dmTimerInt = null;
-  incomingCallFrom = null;
-  S.dmCall = null;
-  hideDmCallUI();
-  renderHeader();
-}
-
-let dmMuted = false;
-function toggleDmMute() {
-  dmMuted = !dmMuted;
-  if (dmLocalStream) dmLocalStream.getAudioTracks().forEach(t => t.enabled = !dmMuted);
-  const b = $('dcmMute');
-  if (b) b.textContent = dmMuted ? '🔇 Mudo' : '🎙 Microfone';
-}
-
-function showDmCallUI() {
-  hideDmCallUI();
-  const f = S.friends.find(x => x.id === S.dmCall.peerId);
-  const name = f ? (f.displayName || f.username) : 'Chamada';
-  const bar = document.createElement('div');
-  bar.id = 'dmCallBar';
-  bar.className = 'call-bar';
-  bar.style.position = 'fixed';
-  bar.style.bottom = '16px';
-  bar.style.right = '16px';
-  bar.style.width = '280px';
-  bar.style.zIndex = '90';
-  bar.style.borderRadius = '10px';
-  bar.style.boxShadow = '0 8px 30px rgba(0,0,0,.5)';
-  bar.innerHTML = `
-    <div class="call-info" id="dcmInfo">📞 ${esc(name)} — ${S.dmCall.state === 'calling' ? 'chamando...' : 'conectado'}</div>
-    <div class="call-btns">
-      <button class="call-btn" id="dcmMute">🎙 Microfone</button>
-      <button class="call-btn danger" id="dcmEnd">🔴 Desligar</button>
-    </div>`;
-  document.body.appendChild(bar);
-  $('dcmMute').onclick = toggleDmMute;
-  $('dcmEnd').onclick = () => endDmCall();
-  clearInterval(dmTimerInt);
-  dmTimerInt = setInterval(updateDmCallUI, 1000);
-}
-
-function updateDmCallUI() {
-  const info = $('dcmInfo');
-  if (!info || !S.dmCall) return;
-  const f = S.friends.find(x => x.id === S.dmCall.peerId);
-  const name = f ? (f.displayName || f.username) : 'Chamada';
-  if (S.dmCall.state === 'active' && S.dmCall.startedAt) {
-    const secs = Math.floor((Date.now() - S.dmCall.startedAt) / 1000);
-    info.textContent = `📞 ${name} — ${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
-  } else {
-    info.textContent = `📞 ${name} — chamando...`;
-  }
-}
-
-function hideDmCallUI() {
-  const bar = $('dmCallBar');
-  if (bar) bar.remove();
+  // Mantido para compatibilidade se houver extensões
 }
 
 /* ---------- Personalizacao de aparencia ---------- */

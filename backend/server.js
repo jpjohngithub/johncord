@@ -642,10 +642,39 @@ wss.on('connection', (ws) => {
         if (psrv) sysMsg(prev.serverId, prev.channelId, `**${me.username}** saiu da call.`);
       }
       if (srv) sysMsg(d.serverId, d.channelId, `**${me.username}** entrou na call.`);
+
+      // Se for chamada privada de DM, avisa o outro participante se ele ainda não estiver na call
+      if (d.serverId === 'dm') {
+        const dm = db.dms[d.channelId];
+        if (dm && dm.participants && dm.participants.includes(me.id)) {
+          const otherId = dm.participants.find(p => p !== me.id);
+          const otherVoice = voice.get(otherId);
+          if (!otherVoice || otherVoice.serverId !== 'dm' || otherVoice.channelId !== d.channelId) {
+            sendTo(otherId, {
+              t: 'dmCallIncoming',
+              dmId: dm.id,
+              fromUser: getUserPublic(me.id)
+            });
+          }
+        }
+      }
+
       broadcastVoiceStates();
       // informar quem já está na call para o novo
       const others = [...voice.entries()].filter(([u, v]) => v.channelId === d.channelId && v.serverId === d.serverId && u !== me.id).map(([u]) => u);
       send(ws, { t: 'voicePeers', peers: others });
+      return;
+    }
+    if (d.t === 'dmCallDecline') {
+      const dm = db.dms[d.dmId];
+      if (dm && dm.participants && dm.participants.includes(me.id)) {
+        const otherId = dm.participants.find(p => p !== me.id);
+        sendTo(otherId, {
+          t: 'dmCallDeclined',
+          dmId: dm.id,
+          fromUser: getUserPublic(me.id)
+        });
+      }
       return;
     }
     if (d.t === 'voiceMute') {
