@@ -1542,17 +1542,32 @@ function renderAddFriendView() {
   const resultsBox = wrap.querySelector('#searchResultsBox');
 
   const doSearch = () => {
-    const q = input.value.trim();
+    const q = input.value.trim().replace(/^@/, '');
     if (!q) { resultsBox.innerHTML = ''; return; }
+    send({ t: 'searchUsers', q });
+  };
+
+  const sendRequest = () => {
+    const q = input.value.trim().replace(/^@/, '');
+    if (!q) {
+      toast('⚠ Digite o nome de usuário para adicionar.');
+      return;
+    }
+    send({ t: 'friendReq', username: q });
     send({ t: 'searchUsers', q });
   };
 
   input.oninput = () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(doSearch, 250);
+    searchTimer = setTimeout(doSearch, 200);
   };
-  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } };
-  btn.onclick = doSearch;
+  input.onkeydown = e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendRequest();
+    }
+  };
+  btn.onclick = sendRequest;
 
   setTimeout(() => input.focus(), 50);
 }

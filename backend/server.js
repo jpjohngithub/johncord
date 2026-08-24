@@ -568,24 +568,28 @@ wss.on('connection', (ws) => {
 
     // ----- Amigos (com solicitacao) -----
     if (d.t === 'friendReq') {
-      const target = Object.values(db.users).find(u => u.username.toLowerCase() === String(d.username || '').trim().toLowerCase());
+      const cleanU = String(d.username || '').trim().toLowerCase().replace(/^@/, '');
+      if (!cleanU) return send(ws, { t: 'err', error: 'Informe o nome do usuário.' });
+      const target = Object.values(db.users).find(u => u.username.toLowerCase() === cleanU || (u.displayName && u.displayName.toLowerCase() === cleanU));
       if (!target) return send(ws, { t: 'err', error: 'Usuário não encontrado.' });
-      if (target.id === me.id) return send(ws, { t: 'err', error: 'Você não pode se adicionar.' });
+      if (target.id === me.id) return send(ws, { t: 'err', error: 'Você não pode adicionar a si mesmo.' });
       if ((me.friends || []).includes(target.id)) return send(ws, { t: 'err', error: `Vocês já são amigos.` });
       if (!target.friendRequests) target.friendRequests = [];
       if (target.friendRequests.includes(me.id)) return send(ws, { t: 'ok', info: 'Solicitação já enviada. Aguarde a pessoa aceitar.' });
       if ((target.friendRequests || []).length > 50) return send(ws, { t: 'err', error: 'Esta pessoa tem muitas solicitações pendentes.' });
+      
       // se a outra pessoa ja me enviou pedido, aceita direto
       const reverseIdx = (me.friendRequests || []).indexOf(target.id);
       if (reverseIdx !== -1) {
         me.friendRequests.splice(reverseIdx, 1);
         makeFriends(me, target);
+        sendTo(me.id, { t: 'requests', requests: (me.friendRequests || []).map(getUserPublic).filter(Boolean) });
         return;
       }
       target.friendRequests.push(me.id);
       save();
       sendTo(target.id, { t: 'friendRequest', from: getUserPublic(me.id), requests: target.friendRequests.map(getUserPublic).filter(Boolean) });
-      send(ws, { t: 'ok', info: `Solicitação enviada para ${target.username}!` });
+      send(ws, { t: 'ok', info: `Solicitação de amizade enviada para ${target.displayName || target.username}!` });
       return;
     }
     if (d.t === 'friendAccept') {
@@ -596,6 +600,7 @@ wss.on('connection', (ws) => {
       const other = db.users[d.userId];
       if (!other) return;
       makeFriends(me, other);
+      sendTo(me.id, { t: 'requests', requests: me.friendRequests.map(getUserPublic).filter(Boolean) });
       return;
     }
     if (d.t === 'friendReject') {
@@ -606,10 +611,10 @@ wss.on('connection', (ws) => {
       return;
     }
     if (d.t === 'searchUsers') {
-      const q = String(d.q || '').trim().toLowerCase();
+      const q = String(d.q || '').trim().toLowerCase().replace(/^@/, '');
       if (q.length < 1) return send(ws, { t: 'searchResults', results: [] });
       const results = Object.values(db.users)
-        .filter(u => u.id !== me.id && u.username.toLowerCase().includes(q))
+        .filter(u => u.id !== me.id && (u.username.toLowerCase().includes(q) || (u.displayName && u.displayName.toLowerCase().includes(q))))
         .slice(0, 10)
         .map(u => {
           let relation = 'none';
