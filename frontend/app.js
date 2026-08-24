@@ -369,6 +369,16 @@ function logout() {
   toast('Você saiu da sua conta.');
 }
 
+function parseInviteCode(input) {
+  if (!input) return '';
+  const str = String(input).trim();
+  if (str.includes('join=')) {
+    const match = str.match(/join=([a-zA-Z0-9_-]+)/);
+    if (match) return match[1];
+  }
+  return str.replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
 const pendingJoin = new URLSearchParams(location.search).get('join');
 
 function onAuthOk(boot) {
@@ -388,8 +398,14 @@ function onAuthOk(boot) {
   renderRail();
   renderSidebar();
   if (pendingJoin) {
+    const code = parseInviteCode(pendingJoin);
     history.replaceState(null, '', '/');
-    send({ t: 'joinInvite', code: pendingJoin });
+    if (code) {
+      send({ t: 'joinInvite', code });
+      toast('Entrando no servidor do convite...');
+    } else {
+      openServer('geral');
+    }
   } else {
     openServer('geral');
   }
@@ -1748,17 +1764,93 @@ $('btnAddServer').onclick = () => {
 window.joinByCodeModal = function () {
   openModal(`
     <h2>Entrar em um servidor</h2>
-    <p>Digite o código do convite que você recebeu.</p>
-    <input class="input" id="mCode" placeholder="Ex: ab12cd34">
+    <p>Digite o código ou cole o link do convite que você recebeu.</p>
+    <input class="input" id="mCode" placeholder="Ex: ab12cd34 ou https://...?join=ab12cd34">
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="document.getElementById('btnAddServer').click()">Voltar</button>
       <button class="btn btn-primary" id="mJoin">Entrar</button>
     </div>`);
-  $('mJoin').onclick = () => {
-    const code = $('mCode').value.trim();
-    if (code) { send({ t: 'joinInvite', code }); closeModal(); }
+  
+  const doJoin = () => {
+    const raw = $('mCode').value.trim();
+    const code = parseInviteCode(raw);
+    if (code) {
+      send({ t: 'joinInvite', code });
+      closeModal();
+      toast('Entrando no servidor...');
+    } else {
+      toast('⚠ Informe um código ou link de convite válido.');
+    }
   };
+
+  $('mJoin').onclick = doJoin;
+  $('mCode').onkeydown = e => { if (e.key === 'Enter') doJoin(); };
+  setTimeout(() => $('mCode').focus(), 50);
 };
+
+function modalInvite(serverId) {
+  const srv = S.servers.find(s => s.id === serverId);
+  if (!srv || srv.permanent) return;
+  const canManageServer = userHasPerm(srv, S.user?.id, 'manageServer');
+  const inviteCode = srv.inviteCode || '';
+  const inviteUrl = `${location.origin}/?join=${inviteCode}`;
+
+  openModal(`
+    <h2>👥 Convidar amigos para ${esc(srv.name)}</h2>
+    <p style="color:var(--text-dim);margin-bottom:14px">Envie este link ou código para seus amigos entrarem no servidor:</p>
+    
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">LINK DO CONVITE:</label>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input class="input" id="mInvUrlInput" value="${inviteUrl}" readonly style="cursor:text;background:#1e1f22">
+      <button class="btn btn-primary" id="mInvCopyBtn" style="white-space:nowrap;padding:8px 16px">📋 Copiar Link</button>
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">CÓDIGO DIRETO:</label>
+    <div style="display:flex;gap:8px;align-items:center;background:#1e1f22;padding:8px 12px;border-radius:8px;margin-bottom:16px">
+      <span style="font-family:monospace;font-size:16px;font-weight:800;color:var(--header,#f2f3f5);letter-spacing:1px">${esc(inviteCode)}</span>
+      <button class="btn btn-ghost btn-small" id="mInvCodeCopyBtn" style="margin-left:auto">Copiar Código</button>
+    </div>
+
+    <div class="modal-actions">
+      ${canManageServer ? `<button class="btn btn-ghost" id="mInvRegenBtn">🔄 Gerar Novo Convite</button>` : ''}
+      <button class="btn btn-primary" onclick="closeModal()">Pronto</button>
+    </div>
+  `);
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+      if ($('mInvCopyBtn')) $('mInvCopyBtn').textContent = '✓ Copiado!';
+      toast('Link do convite copiado!');
+      setTimeout(() => { if ($('mInvCopyBtn')) $('mInvCopyBtn').textContent = '📋 Copiar Link'; }, 2000);
+    }).catch(() => {
+      $('mInvUrlInput').select();
+      document.execCommand('copy');
+      toast('Link do convite copiado!');
+    });
+  };
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(inviteCode).then(() => {
+      if ($('mInvCodeCopyBtn')) $('mInvCodeCopyBtn').textContent = '✓ Copiado!';
+      toast('Código copiado!');
+      setTimeout(() => { if ($('mInvCodeCopyBtn')) $('mInvCodeCopyBtn').textContent = 'Copiar Código'; }, 2000);
+    }).catch(() => {
+      toast(`Código: ${inviteCode}`);
+    });
+  };
+
+  $('mInvCopyBtn').onclick = copyUrl;
+  $('mInvCodeCopyBtn').onclick = copyCode;
+
+  const regenBtn = $('mInvRegenBtn');
+  if (regenBtn) {
+    regenBtn.onclick = () => {
+      send({ t: 'regenerateInvite', serverId: srv.id });
+      toast('Gerando novo convite...');
+      setTimeout(() => modalInvite(serverId), 300);
+    };
+  }
+}
 
 function modalServerManage(serverId, initialTab = 'overview') {
   const srv = S.servers.find(s => s.id === serverId);
