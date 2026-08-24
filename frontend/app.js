@@ -175,7 +175,7 @@ function handle(d) {
         if (u) dm.user.status = u.status;
       });
       refreshMembersIfOpen();
-      if (S.view === 'home' && !S.dmId && S.homeTab === 'friends') { $('messages').innerHTML = ''; renderFriendsView(); }
+      if (S.view === 'home' && !S.dmId) { renderHeader(); renderHomeMain(); }
       break;
     case 'msgNew':
       cacheMsg(`${d.serverId}:${d.channelId}`, d.msg);
@@ -225,14 +225,14 @@ function handle(d) {
     case 'friends':
       S.friends = d.friends;
       renderSidebar();
-      if (S.view === 'home' && !S.dmId && S.homeTab === 'friends') { $('messages').innerHTML = ''; renderFriendsView(); }
+      if (S.view === 'home' && !S.dmId) { renderHeader(); renderHomeMain(); }
       if (d.info) toast('✓ ' + d.info);
       break;
     case 'friendRequest':
       S.requests = d.requests || [...S.requests, d.from];
       toast(`📨 ${d.from.displayName || d.from.username} quer ser seu amigo!`);
       renderSidebar();
-      if (S.view === 'home' && !S.dmId) { $('messages').innerHTML = ''; S.homeTab === 'add' ? renderAddFriendView() : renderFriendsView(); }
+      if (S.view === 'home' && !S.dmId) { renderHeader(); renderHomeMain(); }
       break;
     case 'requests':
       S.requests = d.requests;
@@ -782,33 +782,59 @@ function renderSidebar() {
   body.innerHTML = '';
 
   if (S.view === 'home') {
-    header.textContent = 'Mensagens diretas';
-    const tabs = document.createElement('div');
-    tabs.className = 'home-tabs';
-    [['friends', '👥 Amigos'], ['add', `➕ Adicionar${S.requests.length ? ` (${S.requests.length})` : ''}`]].forEach(([k, label]) => {
-      const b = document.createElement('button');
-      b.className = 'home-tab' + (S.homeTab === k ? ' active' : '');
-      b.textContent = label;
-      b.onclick = () => { S.homeTab = k; renderSidebar(); renderHomeMain(); };
-      tabs.appendChild(b);
-    });
-    body.appendChild(tabs);
+    header.textContent = 'Início';
+    
+    // Botão Principal de Amigos
+    const friendsBtn = document.createElement('div');
+    friendsBtn.className = 'chan-item' + (!S.dmId ? ' active' : '');
+    friendsBtn.style.padding = '8px 10px';
+    friendsBtn.style.marginBottom = '8px';
+    const pendingCount = S.requests.length;
+    const pendingBadge = pendingCount > 0 ? `<span style="background:var(--red,#f23f43);color:#fff;font-size:11px;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:auto">${pendingCount}</span>` : '';
+    friendsBtn.innerHTML = `<span>👥</span><span style="font-weight:600">Amigos</span>${pendingBadge}`;
+    friendsBtn.onclick = () => {
+      S.dmId = null;
+      renderSidebar();
+      renderHeader();
+      renderHomeMain();
+    };
+    body.appendChild(friendsBtn);
 
-    if (S.homeTab === 'friends') {
-      const sec = document.createElement('div');
-      sec.className = 'sidebar-section';
-      sec.innerHTML = `<span>Mensagens diretas</span>`;
-      body.appendChild(sec);
-      S.dmList.forEach(dm => {
-        const item = document.createElement('div');
-        const inThisCall = (S.voiceStates['dm'] && S.voiceStates['dm'][dm.dmId] && S.voiceStates['dm'][dm.dmId].length > 0);
-        item.className = 'chan-item' + (S.dmId === dm.dmId ? ' active' : '');
-        const badgeCall = inThisCall ? `<span class="badge-live-pulse" style="margin-left:auto;font-size:10px;padding:2px 6px">🔊 CALL</span>` : '';
-        item.innerHTML = `<span>@</span><span>${esc(dm.user.displayName || dm.user.username)}</span>${badgeCall}`;
-        item.onclick = () => openDm(dm.dmId);
-        body.appendChild(item);
-      });
+    // Seção Mensagens Diretas
+    const sec = document.createElement('div');
+    sec.className = 'sidebar-section';
+    sec.innerHTML = `<span>Mensagens diretas</span>`;
+    body.appendChild(sec);
+
+    if (S.dmList.length === 0 && S.friends.length === 0) {
+      const emptyNote = document.createElement('div');
+      emptyNote.style.cssText = 'padding:10px 12px;font-size:12.5px;color:var(--text-dim,#949ba4);line-height:1.4';
+      emptyNote.textContent = 'Suas conversas diretas aparecerão aqui.';
+      body.appendChild(emptyNote);
     }
+
+    // Lista de DMs ativas
+    S.dmList.forEach(dm => {
+      const item = document.createElement('div');
+      const inThisCall = (S.voiceStates['dm'] && S.voiceStates['dm'][dm.dmId] && S.voiceStates['dm'][dm.dmId].length > 0);
+      item.className = 'chan-item' + (S.dmId === dm.dmId ? ' active' : '');
+      const badgeCall = inThisCall ? `<span class="badge-live-pulse" style="margin-left:auto;font-size:10px;padding:2px 6px">🔊 CALL</span>` : '';
+      const av = document.createElement('div');
+      av.className = 'user-avatar';
+      av.style.cssText = 'width:24px;height:24px;font-size:11px;margin-right:2px;flex-shrink:0';
+      setAvatar(av, dm.user);
+      
+      const nameSpan = document.createElement('span');
+      nameSpan.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1';
+      nameSpan.textContent = dm.user.displayName || dm.user.username;
+
+      item.appendChild(av);
+      item.appendChild(nameSpan);
+      if (inThisCall) item.innerHTML += badgeCall;
+      
+      item.onclick = () => openDm(dm.dmId);
+      body.appendChild(item);
+    });
     return;
   }
 
@@ -891,11 +917,14 @@ function renderSidebar() {
 
 function renderHeader() {
   const btnCall = $('btnCallDm');
+  const composerWrap = document.querySelector('.composer-wrap');
+
   if (S.view === 'home') {
     if (S.dmId) {
+      if (composerWrap) composerWrap.style.display = '';
       const dm = S.dmList.find(x => x.dmId === S.dmId);
       $('chanIcon').textContent = '@';
-      $('chanName').textContent = dm ? (dm.user.displayName || dm.user.username) : 'DM';
+      $('chanName').textContent = dm ? (dm.user.displayName || dm.user.username) : 'Conversa';
       $('btnInvite').style.display = 'none';
       $('btnMembers').style.display = 'none';
       // Botao de ligar na chamada privada
@@ -924,21 +953,56 @@ function renderHeader() {
         }
       }
     } else {
+      // Hub de Amigos: esconde composer de mensagens pois nao esta em um chat
+      if (composerWrap) composerWrap.style.display = 'none';
       $('chanIcon').textContent = '👥';
       $('chanName').textContent = 'Amigos';
       $('btnInvite').style.display = 'none';
       $('btnMembers').style.display = 'none';
       if (btnCall) btnCall.style.display = 'none';
+
+      // Abas da Hub no Header
+      const headerActions = document.querySelector('.header-actions');
+      if (headerActions) {
+        const onlineCount = S.friends.filter(f => f.status === 'online').length;
+        const pendingCount = S.requests.length;
+        
+        headerActions.innerHTML = `
+          <div class="home-tabs" style="display:flex;gap:6px;align-items:center">
+            <button class="home-tab${S.homeTab === 'online' ? ' active' : ''}" id="tabOnline">Disponível (${onlineCount})</button>
+            <button class="home-tab${S.homeTab === 'all' ? ' active' : ''}" id="tabAll">Todos (${S.friends.length})</button>
+            <button class="home-tab${S.homeTab === 'pending' ? ' active' : ''}" id="tabPending">Pendentes${pendingCount ? ` <span style="background:var(--red,#f23f43);color:#fff;padding:1px 5px;border-radius:8px;font-size:10px">${pendingCount}</span>` : ''}</button>
+            <button class="home-tab btn-primary${S.homeTab === 'add' ? ' active' : ''}" id="tabAdd" style="${S.homeTab === 'add' ? 'background:var(--green,#23a55a);color:#fff;' : 'color:var(--green,#23a55a);background:rgba(35,165,90,0.12)'}">➕ Adicionar amigo</button>
+          </div>
+        `;
+
+        headerActions.querySelector('#tabOnline').onclick = () => { S.homeTab = 'online'; renderHeader(); renderHomeMain(); };
+        headerActions.querySelector('#tabAll').onclick = () => { S.homeTab = 'all'; renderHeader(); renderHomeMain(); };
+        headerActions.querySelector('#tabPending').onclick = () => { S.homeTab = 'pending'; renderHeader(); renderHomeMain(); };
+        headerActions.querySelector('#tabAdd').onclick = () => { S.homeTab = 'add'; renderHeader(); renderHomeMain(); };
+      }
     }
     return;
   }
+
+  // Em Servidor: restaura composer
+  if (composerWrap) composerWrap.style.display = '';
   const srv = currentServer();
   const ch = srv && srv.channels.find(c => c.id === S.channelId);
   $('chanIcon').textContent = ch && ch.type === 'voice' ? '🔊' : '#';
   $('chanName').textContent = ch ? ch.name : srv ? srv.name : '';
-  $('btnInvite').style.display = srv && !srv.permanent ? '' : 'none';
-  $('btnMembers').style.display = '';
-  if (btnCall) btnCall.style.display = 'none';
+  
+  const headerActions = document.querySelector('.header-actions');
+  if (headerActions) {
+    headerActions.innerHTML = `
+      <button id="btnInvite" class="btn btn-small btn-primary" title="Convidar pessoas" style="${srv && !srv.permanent ? '' : 'display:none'}">👥 Convidar</button>
+      <button id="btnMembers" class="btn btn-small btn-ghost" title="Membros">Membros</button>
+    `;
+    const bInv = headerActions.querySelector('#btnInvite');
+    if (bInv) bInv.onclick = () => srv && modalInvite(srv.id);
+    const bMem = headerActions.querySelector('#btnMembers');
+    if (bMem) bMem.onclick = toggleMemberList;
+  }
 }
 
 function requestHistory() {
@@ -1207,75 +1271,159 @@ function renderHomeMain() {
     return;
   }
   const box = $('messages');
-  box.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">Selecione uma conversa ou adicione amigos!</div>';
+  box.innerHTML = '';
   if (S.homeTab === 'add') renderAddFriendView();
   else renderFriendsView();
 }
 
 function renderFriendsView() {
   const box = $('messages');
+  box.innerHTML = '';
   const wrap = document.createElement('div');
-  wrap.style.padding = '20px';
+  wrap.style.cssText = 'padding:24px 30px;max-width:960px;width:100%';
 
-  // Solicitacoes pendentes
-  if (S.requests.length) {
+  if (S.homeTab === 'pending') {
+    // ABA PENDENTES
     const secTitle = document.createElement('div');
     secTitle.className = 'member-cat';
-    secTitle.style.padding = '0 0 8px';
-    secTitle.textContent = `📨 Solicitações de amizade — ${S.requests.length}`;
+    secTitle.style.cssText = 'padding:0 0 12px;font-size:12px;color:var(--text-dim,#949ba4)';
+    secTitle.textContent = `SOLICITAÇÕES PENDENTES — ${S.requests.length}`;
     wrap.appendChild(secTitle);
-    S.requests.forEach(u => {
+
+    if (S.requests.length === 0) {
+      wrap.innerHTML += '<div style="padding:40px 0;text-align:center;color:var(--text-dim,#949ba4);font-size:14px">Você não tem solicitações de amizade pendentes.</div>';
+    } else {
+      S.requests.forEach(u => {
+        const div = document.createElement('div');
+        div.className = 'friend-item';
+        div.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 14px;background:#2b2d31;border-radius:8px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.06)';
+        const av = document.createElement('div');
+        av.className = 'user-avatar';
+        av.style.cssText = 'width:40px;height:40px;font-size:18px';
+        setAvatar(av, u);
+        
+        const info = document.createElement('div');
+        info.className = 'fname';
+        info.innerHTML = `<span style="font-weight:700;color:var(--header,#f23f43);font-size:15px">${esc(u.displayName || u.username)}</span><span class="fst" style="display:block;font-size:12px;color:var(--text-dim,#949ba4)">@${esc(u.username)} enviou um pedido de amizade</span>`;
+        
+        const acts = document.createElement('div');
+        acts.className = 'friend-actions';
+        acts.style.cssText = 'margin-left:auto;display:flex;gap:8px';
+        
+        const okBtn = document.createElement('button');
+        okBtn.className = 'btn btn-small btn-primary';
+        okBtn.style.cssText = 'background:var(--green,#23a55a);padding:6px 14px;font-size:13px;border-radius:4px';
+        okBtn.textContent = '✓ Aceitar';
+        okBtn.onclick = () => {
+          send({ t: 'friendAccept', userId: u.id });
+          S.requests = S.requests.filter(r => r.id !== u.id);
+          renderHeader();
+          renderFriendsView();
+        };
+
+        const noBtn = document.createElement('button');
+        noBtn.className = 'btn btn-small btn-danger';
+        noBtn.style.cssText = 'background:var(--red,#f23f43);padding:6px 14px;font-size:13px;border-radius:4px';
+        noBtn.textContent = '✕ Recusar';
+        noBtn.onclick = () => {
+          send({ t: 'friendReject', userId: u.id });
+          S.requests = S.requests.filter(r => r.id !== u.id);
+          renderHeader();
+          renderFriendsView();
+        };
+
+        acts.appendChild(okBtn);
+        acts.appendChild(noBtn);
+        div.appendChild(av);
+        div.appendChild(info);
+        div.appendChild(acts);
+        wrap.appendChild(div);
+      });
+    }
+    box.appendChild(wrap);
+    return;
+  }
+
+  // ABA ONLINE OU TODOS
+  const list = S.homeTab === 'online'
+    ? S.friends.filter(f => f.status === 'online')
+    : [...S.friends].sort((a, b) => (b.status === 'online' ? 1 : 0) - (a.status === 'online' ? 1 : 0));
+
+  const countLabel = S.homeTab === 'online'
+    ? `AMIGOS DISPONÍVEIS — ${list.length}`
+    : `TODOS OS AMIGOS — ${list.length}`;
+
+  const secTitle = document.createElement('div');
+  secTitle.className = 'member-cat';
+  secTitle.style.cssText = 'padding:0 0 12px;font-size:12px;color:var(--text-dim,#949ba4)';
+  secTitle.textContent = countLabel;
+  wrap.appendChild(secTitle);
+
+  if (list.length === 0) {
+    const emptyMsg = S.homeTab === 'online'
+      ? 'Nenhum amigo online no momento. Que tal jogar algo ou adicionar novos amigos?'
+      : 'Você ainda não tem amigos adicionados. Use a aba "Adicionar amigo" acima!';
+    wrap.innerHTML += `<div style="padding:40px 0;text-align:center;color:var(--text-dim,#949ba4);font-size:14px;line-height:1.6">${emptyMsg}</div>`;
+  } else {
+    list.forEach(f => {
       const div = document.createElement('div');
       div.className = 'friend-item';
-      const av = document.createElement('div'); av.className = 'user-avatar'; setAvatar(av, u);
-      const info = document.createElement('div'); info.className = 'fname';
-      info.innerHTML = `${esc(u.displayName || u.username)}<span class="fst">quer ser seu amigo</span>`;
-      const acts = document.createElement('div'); acts.className = 'friend-actions';
-      const okBtn = document.createElement('button');
-      okBtn.className = 'btn btn-small btn-primary'; okBtn.textContent = '✓ Aceitar';
-      okBtn.onclick = () => { send({ t: 'friendAccept', userId: u.id }); S.requests = S.requests.filter(r => r.id !== u.id); renderFriendsView(); };
-      const noBtn = document.createElement('button');
-      noBtn.className = 'btn btn-small btn-danger'; noBtn.textContent = '✕ Recusar';
-      noBtn.onclick = () => { send({ t: 'friendReject', userId: u.id }); S.requests = S.requests.filter(r => r.id !== u.id); renderFriendsView(); };
-      acts.appendChild(okBtn); acts.appendChild(noBtn);
-      div.appendChild(av); div.appendChild(info); div.appendChild(acts);
+      div.style.cssText = 'display:flex;align-items:center;gap:14px;padding:10px 14px;background:#2b2d31;border-radius:8px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.06);transition:background 0.15s ease';
+      
+      const av = document.createElement('div');
+      av.className = 'user-avatar';
+      av.style.cssText = 'width:40px;height:40px;font-size:18px';
+      setAvatar(av, f);
+
+      const info = document.createElement('div');
+      info.className = 'fname';
+      const dispName = f.displayName || f.username;
+      const stColor = f.status === 'online' ? '#23a55a' : '#747f8d';
+      const stText = f.status === 'online' ? 'Disponível' : 'Offline';
+      info.innerHTML = `
+        <div style="font-weight:700;color:var(--header,#f23f43);font-size:15px">${esc(dispName)} ${f.displayName ? `<span style="color:var(--text-dim,#949ba4);font-weight:400;font-size:13px">@${esc(f.username)}</span>` : ''}</div>
+        <div class="fst" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim,#949ba4)">
+          <span style="width:8px;height:8px;border-radius:50%;background:${stColor};display:inline-block"></span> ${stText}
+        </div>
+      `;
+
+      const acts = document.createElement('div');
+      acts.className = 'friend-actions';
+      acts.style.cssText = 'margin-left:auto;display:flex;gap:8px';
+
+      const msgBtn = document.createElement('button');
+      msgBtn.className = 'btn btn-small btn-primary';
+      msgBtn.style.cssText = 'background:var(--blurple,#5865f2);padding:6px 12px;font-size:13px;border-radius:4px';
+      msgBtn.textContent = '💬 Conversar';
+      msgBtn.onclick = () => startDmWith(f.id);
+
+      const callBtn = document.createElement('button');
+      callBtn.className = 'btn btn-small btn-ghost';
+      callBtn.style.cssText = 'background:#1e1f22;color:var(--header,#f2f3f5);padding:6px 12px;font-size:13px;border-radius:4px;border:1px solid rgba(255,255,255,0.08)';
+      callBtn.textContent = '📞 Ligar';
+      callBtn.onclick = () => startDmCall(f.id);
+
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'btn btn-small btn-danger';
+      rmBtn.style.cssText = 'background:transparent;color:var(--red,#f23f43);padding:6px 8px;font-size:12px';
+      rmBtn.textContent = 'Remover';
+      rmBtn.onclick = () => {
+        if (confirm(`Remover ${f.username} da sua lista de amigos?`)) {
+          send({ t: 'removeFriend', userId: f.id });
+        }
+      };
+
+      acts.appendChild(msgBtn);
+      acts.appendChild(callBtn);
+      acts.appendChild(rmBtn);
+
+      div.appendChild(av);
+      div.appendChild(info);
+      div.appendChild(acts);
       wrap.appendChild(div);
     });
-    const hr = document.createElement('div');
-    hr.style.cssText = 'height:1px;background:rgba(255,255,255,.08);margin:16px 0';
-    wrap.appendChild(hr);
   }
 
-  const allTitle = document.createElement('div');
-  allTitle.className = 'member-cat';
-  allTitle.style.padding = '0 0 8px';
-  allTitle.textContent = `👥 Todos os amigos — ${S.friends.length}`;
-  wrap.appendChild(allTitle);
-
-  if (!S.friends.length && !S.requests.length) {
-    wrap.innerHTML += '<p style="color:var(--text-dim)">Nenhum amigo ainda. Use a aba <b>➕ Adicionar</b> para buscar pessoas pelo nome!</p>';
-  }
-  S.friends.forEach(f => {
-    const div = document.createElement('div');
-    div.className = 'friend-item';
-    const av = document.createElement('div'); av.className = 'user-avatar'; setAvatar(av, f);
-    const info = document.createElement('div'); info.className = 'fname';
-    const dispName = f.displayName || f.username;
-    info.innerHTML = `${esc(dispName)}${f.displayName ? ` <small style="color:var(--text-dim);font-weight:400">@${esc(f.username)}</small>` : ''}<span class="fst">${f.status === 'online' ? '🟢 Online' : '⚫ Offline'}</span>`;
-    const acts = document.createElement('div'); acts.className = 'friend-actions';
-    const callBtn = document.createElement('button');
-    callBtn.className = 'btn btn-small btn-ghost'; callBtn.textContent = '📞 Ligar';
-    callBtn.onclick = () => startDmCall(f.id);
-    const msgBtn = document.createElement('button');
-    msgBtn.className = 'btn btn-small btn-primary'; msgBtn.textContent = '💬 Mensagem';
-    msgBtn.onclick = () => startDmWith(f.id);
-    const rmBtn = document.createElement('button');
-    rmBtn.className = 'btn btn-small btn-danger'; rmBtn.textContent = 'Remover';
-    rmBtn.onclick = () => { if (confirm(`Remover ${f.username}?`)) send({ t: 'removeFriend', userId: f.id }); };
-    acts.appendChild(callBtn); acts.appendChild(msgBtn); acts.appendChild(rmBtn);
-    div.appendChild(av); div.appendChild(info); div.appendChild(acts);
-    wrap.appendChild(div);
-  });
   box.appendChild(wrap);
 }
 
@@ -1283,26 +1431,36 @@ let searchTimer = null;
 function renderAddFriendView() {
   const box = $('messages');
   const wrap = document.createElement('div');
-  wrap.style.padding = '20px'; wrap.style.maxWidth = '560px';
+  wrap.style.cssText = 'padding:24px 30px;max-width:680px;width:100%';
   wrap.innerHTML = `
-    <h3 style="color:var(--header)">Adicionar amigo</h3>
-    <p style="color:var(--text-dim);margin:8px 0 14px">Digite o nome do usuário e envie uma solicitação — a pessoa precisa aceitar para vocês se tornarem amigos.</p>`;
-  const input = document.createElement('input');
-  input.className = 'input'; input.placeholder = 'Buscar usuário...';
-  input.autocomplete = 'off';
-  const resultsBox = document.createElement('div');
-  resultsBox.id = 'searchResultsBox';
-  resultsBox.style.marginTop = '12px';
-  input.oninput = () => {
-    clearTimeout(searchTimer);
+    <h2 style="color:var(--header,#f2f3f5);font-size:20px;font-weight:700;margin-bottom:6px">ADICIONAR AMIGO</h2>
+    <p style="color:var(--text-dim,#949ba4);font-size:14px;margin-bottom:16px;line-height:1.5">Você pode adicionar amigos usando o nome de usuário do JohnCord.</p>
+    <div style="display:flex;align-items:center;background:#1e1f22;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:4px 8px">
+      <input id="addFriendInput" class="input" style="background:transparent;border:none;flex:1;padding:10px 12px;font-size:15px;color:#fff;outline:none" placeholder="Digite o nome de usuário..." autocomplete="off">
+      <button id="addFriendBtn" class="btn btn-primary" style="background:var(--blurple,#5865f2);padding:8px 16px;font-size:13px;border-radius:4px">Enviar pedido</button>
+    </div>
+    <div id="searchResultsBox" style="margin-top:20px"></div>
+  `;
+  
+  box.appendChild(wrap);
+
+  const input = wrap.querySelector('#addFriendInput');
+  const btn = wrap.querySelector('#addFriendBtn');
+  const resultsBox = wrap.querySelector('#searchResultsBox');
+
+  const doSearch = () => {
     const q = input.value.trim();
     if (!q) { resultsBox.innerHTML = ''; return; }
-    searchTimer = setTimeout(() => send({ t: 'searchUsers', q }), 250);
+    send({ t: 'searchUsers', q });
   };
-  input.onkeydown = e => { if (e.key === 'Enter' && input.value.trim()) send({ t: 'searchUsers', q: input.value.trim() }); };
-  wrap.appendChild(input);
-  wrap.appendChild(resultsBox);
-  box.appendChild(wrap);
+
+  input.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(doSearch, 250);
+  };
+  input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } };
+  btn.onclick = doSearch;
+
   setTimeout(() => input.focus(), 50);
 }
 
@@ -2030,8 +2188,8 @@ function setupLocalVAD(stream) {
   try {
     vadSource = globalAudioCtx.createMediaStreamSource(stream);
     vadAnalyser = globalAudioCtx.createAnalyser();
-    vadAnalyser.fftSize = 512;
-    vadAnalyser.smoothingTimeConstant = 0.2;
+    vadAnalyser.fftSize = 256;
+    vadAnalyser.smoothingTimeConstant = 0.3;
     vadSource.connect(vadAnalyser);
 
     const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
@@ -2050,16 +2208,16 @@ function setupLocalVAD(stream) {
       const average = sum / dataArray.length;
       
       // Limiar de detecção de fala
-      if (average > 10) {
+      if (average > 12) {
         if (!isSpeaking) setLocalSpeaking(true);
         if (speakingTimeout) clearTimeout(speakingTimeout);
         speakingTimeout = setTimeout(() => {
           setLocalSpeaking(false);
-        }, 350);
+        }, 400);
       }
     };
 
-    vadInterval = setInterval(checkAudioLevel, 40);
+    vadInterval = setInterval(checkAudioLevel, 80);
   } catch (e) {}
 }
 
@@ -2110,104 +2268,10 @@ function updateSpeakingUI(userId, speaking) {
   }
 }
 
-/* ---------- Fallback de audio via servidor (funciona em qualquer rede) ---------- */
-const RELAY_SAMPLE_RATE = 24000;
-let relaySendNode = null;
-let relaySendSrc = null;
-let relayMuteGain = null;
-const relayPlay = {}; // uid -> { queue:[], nextTime:0 }
-
-function u8ToB64(u8) {
-  let s = '';
-  const CH = 0x8000;
-  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
-  return btoa(s);
-}
-function b64ToU8(b64) {
-  const s = atob(b64);
-  const u8 = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
-  return u8;
-}
-
-function startRelaySender() {
-  if (!localStream || relaySendNode) return;
-  try {
-    unlockAudioContext();
-    if (!globalAudioCtx) return;
-    relaySendSrc = globalAudioCtx.createMediaStreamSource(localStream);
-    relaySendNode = globalAudioCtx.createScriptProcessor(4096, 1, 1);
-    relayMuteGain = globalAudioCtx.createGain();
-    relayMuteGain.gain.value = 0; // evita feedback: o node precisa estar conectado para rodar
-    relaySendNode.onaudioprocess = e => {
-      if (!S.voice || S.muted || !localStream) return;
-      // so envia por relay a quem o WebRTC ainda nao conectou
-      const targets = Object.entries(connStatus).filter(([pid, st]) => st !== 'connected').map(([pid]) => pid);
-      if (!targets.length) return;
-      const input = e.inputBuffer.getChannelData(0);
-      // downsample para 24kHz mono Int16
-      const ratio = input.length > 1 ? Math.max(1, Math.round(globalAudioCtx.sampleRate / RELAY_SAMPLE_RATE)) : 1;
-      const outLen = Math.floor(input.length / ratio);
-      const pcm = new Int16Array(outLen);
-      for (let i = 0; i < outLen; i++) {
-        let sum = 0;
-        for (let j = 0; j < ratio; j++) sum += input[i * ratio + j] || 0;
-        const v = Math.max(-1, Math.min(1, (sum / ratio) * 1.6));
-        pcm[i] = v < 0 ? v * 32768 : v * 32767;
-      }
-      const b64 = u8ToB64(new Uint8Array(pcm.buffer));
-      targets.forEach(pid => send({ t: 'voiceRelay', to: pid, audio: b64 }));
-    };
-    relaySendSrc.connect(relaySendNode);
-    relaySendNode.connect(relayMuteGain);
-    relayMuteGain.connect(globalAudioCtx.destination);
-  } catch (e) { console.warn('[voz] fallback de audio indisponivel', e); }
-}
-
-function stopRelaySender() {
-  try {
-    if (relaySendNode) { relaySendNode.disconnect(); relaySendNode.onaudioprocess = null; relaySendNode = null; }
-    if (relaySendSrc) { relaySendSrc.disconnect(); relaySendSrc = null; }
-    if (relayMuteGain) { relayMuteGain.disconnect(); relayMuteGain = null; }
-  } catch (e) {}
-  for (const k of Object.keys(relayPlay)) delete relayPlay[k];
-}
-
-function playRelayAudio(uid, audioB64) {
-  if (!S.voice || S.deafened) return;
-  // se o WebRTC direto ja conectou com essa pessoa, ignora o relay (evita som duplicado)
-  if (connStatus[uid] === 'connected') return;
-  unlockAudioContext();
-  if (!globalAudioCtx) return;
-  try {
-    let r = relayPlay[uid];
-    if (!r) r = relayPlay[uid] = { queue: [], nextTime: 0 };
-    const u8 = b64ToU8(audioB64);
-    const i16 = new Int16Array(u8.buffer);
-    if (r.queue.length > 25) r.queue.length = 0; // descarta atraso excessivo
-    r.queue.push(i16);
-
-    // agenda os buffers enfileirados de forma continua
-    while (r.queue.length) {
-      const now = globalAudioCtx.currentTime;
-      if (!r.nextTime || r.nextTime < now + 0.02) {
-        r.nextTime = now + 0.15; // jitter buffer de 150ms
-      }
-      const i16buf = r.queue.shift();
-      const f32 = new Float32Array(i16buf.length);
-      const vol = Math.min(2, Math.max(0, getUserVolume(uid) / 100)) * (S.deafened ? 0 : 1);
-      for (let i = 0; i < i16buf.length; i++) f32[i] = (i16buf[i] / 32768) * vol;
-      const buf = globalAudioCtx.createBuffer(1, f32.length, RELAY_SAMPLE_RATE);
-      buf.copyToChannel(f32, 0);
-      const src = globalAudioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(globalAudioCtx.destination);
-      src.start(r.nextTime);
-      r.nextTime += f32.length / RELAY_SAMPLE_RATE;
-      if (r.nextTime > now + 0.5) break; // nao acumula mais de ~500ms
-    }
-  } catch (e) {}
-}
+/* WebRTC puro de alta fidelidade e baixa latência */
+function startRelaySender() {}
+function stopRelaySender() {}
+function playRelayAudio(uid, audioB64) {}
 
 function startVoiceTimer() {
   if (voiceTimerInterval) clearInterval(voiceTimerInterval);
@@ -2862,7 +2926,17 @@ function renderVoiceRoom() {
 /* ---------- ICE / TURN ---------- */
 function buildIceServers() {
   const servers = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }
+    {
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302',
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.services.mozilla.com'
+      ]
+    }
   ];
   const turn = window.JOHNCORD_TURN;
   // so usa o TURN se as credenciais foram realmente configuradas
