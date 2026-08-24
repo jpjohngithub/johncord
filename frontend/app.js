@@ -177,30 +177,41 @@ function handle(d) {
       refreshMembersIfOpen();
       if (S.view === 'home' && !S.dmId) { renderHeader(); renderHomeMain(); }
       break;
-    case 'msgNew':
-      cacheMsg(`${d.serverId}:${d.channelId}`, d.msg);
-      if (S.view === d.serverId && S.channelId === d.channelId) {
-        const welcome = document.querySelector('.channel-welcome');
-        if (welcome) welcome.remove();
-        appendMsg(d.msg);
-      } else {
-        if (d.msg.userId !== S.user?.id) playNotifySound();
+    case 'msgNew': {
+      const key = `${d.serverId}:${d.channelId}`;
+      const list = S.channelCache[key] || [];
+      const alreadyRendered = list.some(m => m.id === d.msg.id || (m.userId === d.msg.userId && m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 4000));
+      cacheMsg(key, d.msg);
+      if (!alreadyRendered) {
+        if (S.view === d.serverId && S.channelId === d.channelId) {
+          const welcome = document.querySelector('.channel-welcome');
+          if (welcome) welcome.remove();
+          appendMsg(d.msg);
+        } else {
+          if (d.msg.userId !== S.user?.id) playNotifySound();
+        }
       }
       break;
-    case 'dmNew':
+    }
+    case 'dmNew': {
       if (!S.dms[d.dmId]) S.dms[d.dmId] = { messages: [] };
-      S.dms[d.dmId].messages.push(d.msg);
-      if (S.view === 'home' && (S.dmId === d.dmId || S.dmId === 'user:' + d.msg.userId)) {
-        if (S.dmId !== d.dmId) { ensureDmInList(d.withUserId, d.dmId); S.dmId = d.dmId; renderSidebar(); renderHeader(); }
-        renderDmMessages();
-      } else {
-        if (d.msg.userId !== S.user?.id) {
-          toast(`💬 Nova mensagem de ${d.msg.displayName || d.msg.username}`);
-          playNotifySound();
+      const dmMessages = S.dms[d.dmId].messages;
+      const alreadyRendered = dmMessages.some(m => m.id === d.msg.id || (m.userId === d.msg.userId && m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 4000));
+      if (!alreadyRendered) {
+        dmMessages.push(d.msg);
+        if (S.view === 'home' && (S.dmId === d.dmId || S.dmId === 'user:' + d.msg.userId)) {
+          if (S.dmId !== d.dmId) { ensureDmInList(d.withUserId, d.dmId); S.dmId = d.dmId; renderSidebar(); renderHeader(); }
+          appendMsg(d.msg);
+        } else {
+          if (d.msg.userId !== S.user?.id) {
+            toast(`💬 Nova mensagem de ${d.msg.displayName || d.msg.username}`);
+            playNotifySound();
+          }
         }
       }
       ensureDmInList(d.withUserId, d.dmId);
       break;
+    }
     case 'dmOpened':
       S.dms[d.dm.id] = { messages: d.dm.msgs };
       const idx = S.dmList.findIndex(x => x.dmId === 'user:' + d.dm.user.id);
@@ -878,7 +889,15 @@ function renderSidebar() {
     item.innerHTML = `<span class="chan-hash">#</span><span>${esc(ch.name)}</span>${del}`;
     item.onclick = e => {
       if (e.target.classList.contains('chan-del')) {
-        if (confirm(`Excluir #${ch.name}?`)) send({ t: 'deleteChannel', serverId: srv.id, channelId: ch.id });
+        if (confirm(`Excluir #${ch.name}?`)) {
+          srv.channels = srv.channels.filter(c => c.id !== ch.id);
+          if (S.channelId === ch.id) {
+            const firstText = srv.channels.find(c => c.type === 'text');
+            if (firstText) openChannel(firstText.id);
+          }
+          renderSidebar();
+          send({ t: 'deleteChannel', serverId: srv.id, channelId: ch.id });
+        }
         return;
       }
       openChannel(ch.id);
@@ -1207,12 +1226,14 @@ function scrollToBottomForce() {
   });
 }
 // Compat: rolagem forcada
-function scrollBottom() { scrollToBottomForce(); }
-
 function cacheMsg(key, msg) {
   if (!S.channelCache[key]) S.channelCache[key] = [];
-  S.channelCache[key].push(msg);
-  if (S.channelCache[key].length > 200) S.channelCache[key].shift();
+  const list = S.channelCache[key];
+  const exists = list.some(m => m.id === msg.id || (m.userId === msg.userId && m.content === msg.content && Math.abs(m.ts - msg.ts) < 4000));
+  if (!exists) {
+    list.push(msg);
+    if (list.length > 200) list.shift();
+  }
 }
 
 function refreshMembersIfOpen() {
@@ -1568,13 +1589,34 @@ $('msgInput').addEventListener('input', () => {
 
 function sendCurrent() {
   const val = $('msgInput').value.trim();
-  if (!val) return;
+  if (!val || !S.user) return;
   $('msgInput').value = '';
+
+  const localMsg = {
+    id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    userId: S.user.id,
+    username: S.user.username,
+    displayName: S.user.displayName || S.user.username,
+    avatar: S.user.avatar || null,
+    color: S.user.color || '#5865f2',
+    content: val,
+    ts: Date.now()
+  };
+
   if (S.view === 'home' && S.dmId) {
     const entry = S.dmList.find(x => x.dmId === S.dmId);
     if (!entry) return;
+    if (!S.dms[S.dmId]) S.dms[S.dmId] = { messages: [] };
+    S.dms[S.dmId].messages.push(localMsg);
+    appendMsg(localMsg);
     send({ t: 'dm', userId: entry.user.id, content: val });
   } else if (S.channelId) {
+    const key = `${S.view}:${S.channelId}`;
+    if (!S.channelCache[key]) S.channelCache[key] = [];
+    S.channelCache[key].push(localMsg);
+    const welcome = document.querySelector('.channel-welcome');
+    if (welcome) welcome.remove();
+    appendMsg(localMsg);
     send({ t: 'msg', serverId: S.view, channelId: S.channelId, content: val });
   }
 }
@@ -1678,6 +1720,23 @@ $('btnAddServer').onclick = () => {
   $('mCreate').onclick = () => {
     const name = $('mSrvName').value.trim();
     if (name.length >= 2) {
+      const tempId = 'temp_srv_' + Date.now();
+      const tempSrv = {
+        id: tempId,
+        name,
+        icon: selectedIcon,
+        banner: selectedBanner,
+        owner: S.user?.id,
+        channels: [
+          { id: 'ch_text_' + Date.now(), name: 'geral', type: 'text', messages: [] },
+          { id: 'ch_voice_' + Date.now(), name: 'Geral', type: 'voice' }
+        ],
+        roles: [],
+        members: [S.user?.id]
+      };
+      S.servers.push(tempSrv);
+      renderRail();
+      openServer(tempId);
       send({ t: 'createServer', name, icon: selectedIcon, banner: selectedBanner });
       closeModal();
       toast('Servidor criado com sucesso!');
@@ -1859,9 +1918,12 @@ function modalServerManage(serverId, initialTab = 'overview') {
     if ($('smBtnDeleteSrv')) {
       $('smBtnDeleteSrv').onclick = () => {
         if (confirm(`Tem certeza absoluta que deseja excluir o servidor "${srv.name}"? Esta ação não pode ser desfeita!`)) {
-          send({ t: 'deleteServer', serverId: srv.id });
+          const srvId = srv.id;
+          S.servers = S.servers.filter(s => s.id !== srvId);
           closeModal();
           openHome();
+          renderRail();
+          send({ t: 'deleteServer', serverId: srvId });
           toast('Servidor excluído.');
         }
       };
@@ -1869,9 +1931,12 @@ function modalServerManage(serverId, initialTab = 'overview') {
     if ($('smBtnLeaveSrv')) {
       $('smBtnLeaveSrv').onclick = () => {
         if (confirm(`Deseja sair de ${srv.name}?`)) {
-          send({ t: 'leaveServer', serverId: srv.id });
+          const srvId = srv.id;
+          S.servers = S.servers.filter(s => s.id !== srvId);
           closeModal();
           openHome();
+          renderRail();
+          send({ t: 'leaveServer', serverId: srvId });
           toast('Você saiu do servidor.');
         }
       };
@@ -2107,7 +2172,21 @@ function modalCreateChannel(type) {
     </div>`);
   $('mChGo').onclick = () => {
     const name = $('mChName').value.trim();
-    if (name) { send({ t: 'createChannel', serverId: S.view, name, type }); closeModal(); }
+    if (name) {
+      const srv = currentServer();
+      if (srv) {
+        const tempCh = {
+          id: 'temp_ch_' + Date.now(),
+          name: type === 'voice' ? name : name.toLowerCase().replace(/[^a-z0-9áàâãéêíóôõúç\- ]/gi, ''),
+          type: type === 'voice' ? 'voice' : 'text',
+          messages: []
+        };
+        srv.channels.push(tempCh);
+        renderSidebar();
+      }
+      send({ t: 'createChannel', serverId: S.view, name, type });
+      closeModal();
+    }
   };
 }
 
