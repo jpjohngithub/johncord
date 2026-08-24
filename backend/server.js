@@ -692,7 +692,11 @@ wss.on('connection', (ws) => {
   function login(user) {
     me = user;
     online.set(ws, user.id);
-    if (byUser.has(user.id)) { try { byUser.get(user.id).close(); } catch (e) {} }
+    if (byUser.has(user.id)) {
+      const old = byUser.get(user.id);
+      send(old, { t: 'sessionReplaced' });
+      try { old.close(); } catch (e) {}
+    }
     byUser.set(user.id, ws);
     broadcastUsers();
   }

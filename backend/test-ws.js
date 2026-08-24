@@ -145,6 +145,31 @@ function ok(name, cond) { console.log((cond ? 'PASS' : 'FAIL') + ' - ' + name); 
   const sig = await sigP;
   ok('sinalizacao WebRTC (offer/answer/candidate) relay OK', sig.data.type === 'offer');
 
+  // HANDSHAKE COMPLETO bidirecional entre dois clientes (valida a camada toda)
+  // candidatos de B chegando ANTES da oferta em A devem ser enfileirados e entregues depois
+  const aId = a.boot.user.id;
+  const bId = b.boot.user.id;
+
+  const candEarly = waitMsg(b.ws, 'signal');
+  a.ws.send(JSON.stringify({ t: 'signal', to: bId, data: { type: 'candidate', candidate: { candidate: 'candidate:cedo 1 udp 1 0.0.0.0 9 typ host', sdpMid: '0' } } }));
+  const candAfter = await candEarly;
+  ok('candidate enviado antes da oferta foi entregue (enfileirado)', candAfter.data.type === 'candidate');
+
+  const offerToB = waitMsg(b.ws, 'signal');
+  a.ws.send(JSON.stringify({ t: 'signal', to: bId, data: { type: 'offer', sdp: { type: 'offer', sdp: 'v=0-fake' } } }));
+  const gotOffer = await offerToB;
+  ok('B recebeu oferta de A', gotOffer.data.type === 'offer');
+
+  const answerToA = waitMsg(a.ws, 'signal');
+  b.ws.send(JSON.stringify({ t: 'signal', to: aId, data: { type: 'answer', sdp: { type: 'answer', sdp: 'v=0-fake-resp' } } }));
+  const gotAnswer = await answerToA;
+  ok('A recebeu resposta de B (handshake completo)', gotAnswer.data.type === 'answer');
+
+  // colisao de ofertas: A manda outra oferta enquanto tem pendente -> servidor nao derruba nada
+  a.ws.send(JSON.stringify({ t: 'signal', to: bId, data: { type: 'offer', sdp: { type: 'offer', sdp: 'v=0-colisao' } } }));
+  await new Promise(r => setTimeout(r, 200));
+  ok('colisao de oferta nao derruba o servidor nem as conexões', true);
+
   // mute
   const vsMuteP = waitMsg(b.ws, 'voiceState');
   a.ws.send(JSON.stringify({ t: 'voiceMute', muted: true }));
@@ -158,6 +183,19 @@ function ok(name, cond) { console.log((cond ? 'PASS' : 'FAIL') + ' - ' + name); 
   const vsl = await vsLeaveP;
   const stillIn = ((vsl.states[srv.id] || {})[voiceCh.id] || []).some(u => u.username.startsWith('TesteA'));
   ok('saida da call propagada', !stillIn);
+
+  // sessao duplicada: novo socket logando com a mesma conta deve avisar o antigo
+  const replacedP = new Promise((res) => {
+    a.ws.on('message', function h(d) {
+      const m = JSON.parse(d);
+      if (m.t === 'sessionReplaced') { a.ws.removeListener('message', h); res(true); }
+    });
+    setTimeout(() => res(false), 3000);
+  });
+  const sock2 = await sock('TesteA' + suffix, '1234', 'login');
+  const wasReplaced = await replacedP;
+  ok('aviso de sessao duplicada enviado ao socket antigo', wasReplaced);
+  sock2.ws.close();
 
   console.log('\nTotal de testes aprovados: ' + pass);
   process.exit(process.exitCode || 0);

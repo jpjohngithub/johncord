@@ -268,6 +268,14 @@ function handle(d) {
       renderSidebar();
       break;
     case 'signal': handleSignal(d.from, d.data); break;
+    case 'sessionReplaced':
+      S.user = null;
+      lastAuth = null;
+      try { localStorage.removeItem('jc_auth'); } catch (e) {}
+      $('app').style.display = 'none';
+      $('authScreen').style.display = 'flex';
+      showAuthError('Sua conta foi aberta em outro lugar. Se não foi você, troque sua senha!');
+      break;
   }
 }
 
@@ -861,7 +869,7 @@ function renderSidebar() {
         const isMe = S.user && u.id === S.user.id;
         const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume">🔊</button>` : '';
 
-        vu.innerHTML = `<span class="dot"></span><span class="vu-name">${esc(u.username)}</span><span class="vu-actions">${liveBadge}${stateIcon}${volBtn}</span>`;
+        vu.innerHTML = `<span class="dot"></span><span class="vu-name">${esc(u.username)}</span><span class="vu-actions">${liveBadge}${stateIcon}${volBtn}<span data-conn-uid="${u.id}" class="conn-badge"></span></span>`;
         const b = vu.querySelector('.vu-btn');
         if (b) b.onclick = e => { e.stopPropagation(); openVolumeModal(u.id, u.username); };
         wrap.appendChild(vu);
@@ -2118,8 +2126,23 @@ async function joinVoice(serverId, channelId) {
     renderVoiceRoom();
     send({ t: 'voiceJoin', serverId, channelId });
   } catch (e) {
-    toast('⚠ Microfone bloqueado! Permita o acesso ao microfone no navegador.');
+    openMicHelpModal();
   }
+}
+
+function openMicHelpModal() {
+  openModal(`
+    <h2>🎤 Microfone bloqueado</h2>
+    <p>O JohnCord precisa do microfone para você entrar na call. Libere o acesso:</p>
+    <div style="background:var(--bg-dark,#1e1f22);border-radius:8px;padding:12px;margin-bottom:14px;font-size:14px;line-height:1.7">
+      <b>Chrome / Edge:</b> clique no ícone 🔒 ou 🎥 na barra de endereço → Permissões → Microfone → Permitir<br>
+      <b>Firefox:</b> ícone 🛡️ na barra de endereço → Remover bloqueio de microfone<br>
+      Depois <b>recarregue a página (F5)</b> e aceite a permissão quando aparecer.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="location.reload()">🔄 Recarregar agora</button>
+      <button class="btn btn-primary" onclick="closeModal()">Entendi</button>
+    </div>`);
 }
 
 function leaveVoice() {
@@ -2213,7 +2236,7 @@ async function toggleScreenShare() {
 
     for (const [pid, pc] of Object.entries(peers)) {
       screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
-      createOffer(pc, pid);
+      makeOffer(pc, pid);
     }
 
     screenStream.getVideoTracks()[0].onended = () => {
@@ -2248,7 +2271,7 @@ function stopScreenShare(notify = true) {
     if (S.spotlightUser === S.user?.id) S.spotlightUser = null;
     if (notify) send({ t: 'voiceScreen', screenSharing: false });
     for (const [pid, pc] of Object.entries(peers)) {
-      createOffer(pc, pid);
+      makeOffer(pc, pid);
     }
     if (S.voice) updateVoiceBar(S.voice.serverId, S.voice.channelId);
     renderVoiceRoom();
@@ -2625,6 +2648,7 @@ function renderVoiceRoom() {
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="openUserProfileModal('${u.id}')">
         ${u.screenSharing ? `<span class="badge-live-pulse">🔴 AO VIVO</span>` : ''}
         <span>${esc(u.displayName || u.username)}</span>
+        <span data-conn-uid="${u.id}" style="font-size:11px"></span>
       </div>
       <div class="vr-actions">
         <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
@@ -2664,58 +2688,75 @@ function renderVoiceRoom() {
   updateVoiceControls();
 }
 
+/* ---------- ICE / TURN ---------- */
+function buildIceServers() {
+  const servers = [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }
+  ];
+  const turn = window.JOHNCORD_TURN;
+  // so usa o TURN se as credenciais foram realmente configuradas
+  if (turn && turn.urls && turn.username && turn.credential &&
+      !String(turn.username).includes('COLOQUE') && !String(turn.credential).includes('COLOQUE')) {
+    servers.push({ urls: turn.urls, username: turn.username, credential: turn.credential });
+  }
+  return servers;
+}
+
+// Status de conexao por pessoa: pid -> 'connecting'|'connected'|'failed'|'retrying'
+const connStatus = {};
+
 function getPeer(peerId, initiator) {
   if (peers[peerId]) return peers[peerId];
   if (!pendingCandidates[peerId]) pendingCandidates[peerId] = [];
 
-  const pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-      // Servidores TURN gratuitos - obrigatorios para conectar redes diferentes
-      {
-        urls: [
-          'turn:openrelay.metered.ca:80',
-          'turn:openrelay.metered.ca:80?transport=tcp',
-          'turn:openrelay.metered.ca:443',
-          'turns:openrelay.metered.ca:443?transport=tcp'
-        ],
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:turn.anyfirewall.com:443?transport=tcp',
-        username: 'webrtc',
-        credential: 'webrtc'
-      }
-    ]
-  });
+  const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
   peers[peerId] = pc;
+  // Perfect negotiation: polite e quem tem o id menor (aceita rollback em conflito)
+  pc._polite = S.user.id < peerId;
+  pc._makingOffer = false;
+  pc._ignoreOffer = false;
+  pc._settingAnswerPending = false;
+  connStatus[peerId] = 'connecting';
+  renderConnBadges();
+
+  // Watchdog: se nao conectar em 10s, reinicia o ICE invertendo quem inicia
+  clearTimeout(pc._watchdog);
+  pc._watchdog = setTimeout(() => {
+    if (peers[peerId] === pc && connStatus[peerId] !== 'connected') {
+      console.warn('[voz] watchdog: reiniciando conexao com', peerId);
+      recreatePeer(peerId, true);
+    }
+  }, 10000);
 
   // Reconexao automatica se a conexao falhar
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed') {
-      try { pc.close(); } catch (e) {}
-      delete peers[peerId];
-      delete pendingCandidates[peerId];
-      setTimeout(() => {
-        if (S.voice && !peers[peerId]) getPeer(peerId, S.user.id > peerId);
-      }, 1500);
+    if (!peers[peerId] || peers[peerId] !== pc) return;
+    if (pc.connectionState === 'connected') {
+      clearTimeout(pc._watchdog);
+      connStatus[peerId] = 'connected';
+      renderConnBadges();
+    } else if (pc.connectionState === 'failed') {
+      connStatus[peerId] = 'failed';
+      renderConnBadges();
+      toast('⚠ Conexão com um participante falhou. Tentando novamente…');
+      recreatePeer(peerId, true);
+    } else if (pc.connectionState === 'disconnected') {
+      connStatus[peerId] = 'connecting';
+      renderConnBadges();
+      try { pc.restartIce(); } catch (e) {}
     }
   };
-  
+
   if (localStream) {
     localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
   }
-  if (screenStream) {
-    screenStream.getTracks().forEach(t => pc.addTrack(t, screenStream));
-  }
-  
+
   pc.onicecandidate = e => {
     if (e.candidate) {
       send({ t: 'signal', to: peerId, data: { type: 'candidate', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate } });
     }
   };
-  
+
   pc.ontrack = e => {
     unlockAudioContext();
     const stream = e.streams[0] || new MediaStream([e.track]);
@@ -2756,7 +2797,7 @@ function getPeer(peerId, initiator) {
       audio.srcObject = stream;
       audio.muted = S.deafened;
       audio.volume = S.deafened ? 0 : Math.min(1, Math.max(0, getUserVolume(peerId) / 100));
-      
+
       const tryPlay = () => {
         audio.play().catch(() => {
           const unlock = () => {
@@ -2771,23 +2812,51 @@ function getPeer(peerId, initiator) {
       tryPlay();
     }
   };
-  
-  if (initiator) createOffer(pc, peerId);
+
+  if (initiator) makeOffer(pc, peerId);
   return pc;
 }
 
-async function createOffer(pc, peerId) {
+function recreatePeer(peerId, initiator) {
+  const old = peers[peerId];
+  if (old) {
+    clearTimeout(old._watchdog);
+    try { old.close(); } catch (e) {}
+    delete peers[peerId];
+  }
+  delete pendingCandidates[peerId];
+  if (S.voice) {
+    connStatus[peerId] = initiator ? 'retrying' : 'connecting';
+    renderConnBadges();
+    getPeer(peerId, initiator);
+  }
+}
+
+// Perfect negotiation: criacao de oferta com fila quando ocupado
+const renegQueue = new Set();
+async function makeOffer(pc, peerId) {
+  if (!peers[peerId] || peers[peerId] !== pc) return;
+  if (pc.signalingState !== 'stable') {
+    renegQueue.add(peerId); // tenta de novo apos aplicar a resposta pendente
+    return;
+  }
   try {
-    if (localStream) {
-      const senders = pc.getSenders().map(s => s.track);
-      localStream.getTracks().forEach(t => {
-        if (!senders.includes(t)) pc.addTrack(t, localStream);
-      });
-    }
-    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+    pc._makingOffer = true;
+    const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     send({ t: 'signal', to: peerId, data: { type: 'offer', sdp: pc.localDescription } });
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[voz] falha ao criar oferta para', peerId, e);
+  } finally {
+    pc._makingOffer = false;
+  }
+}
+
+function flushRenegQueue(peerId) {
+  if (!renegQueue.has(peerId)) return;
+  renegQueue.delete(peerId);
+  const pc = peers[peerId];
+  if (pc && pc.signalingState === 'stable') makeOffer(pc, peerId);
 }
 
 function syncVoicePeers() {
@@ -2797,9 +2866,12 @@ function syncVoicePeers() {
 
   for (const pid of Object.keys(peers)) {
     if (!inChan.includes(pid)) {
+      const old = peers[pid];
+      if (old) clearTimeout(old._watchdog);
       peers[pid].close();
       delete peers[pid];
       delete pendingCandidates[pid];
+      delete connStatus[pid];
       const a = document.getElementById('audio-' + pid);
       if (a) a.remove();
       const v = document.getElementById('video-' + pid);
@@ -2807,7 +2879,7 @@ function syncVoicePeers() {
       if (S.spotlightUser === pid) S.spotlightUser = null;
     }
   }
-  // Criacao deterministica: apenas o maior id inicia a oferta (evita glare)
+  // Criacao deterministica: apenas o maior id inicia a oferta (evita glare inicial)
   inChan.forEach(pid => {
     if (!peers[pid] && S.user.id > pid) getPeer(pid, true);
   });
@@ -2822,35 +2894,90 @@ async function flushPendingCandidates(peerId, pc) {
   }
 }
 
+// Perfect negotiation completa (padrao W3C - usado pelo Discord/Meet)
 async function handleSignal(from, data) {
-  const pc = getPeer(from, false);
+  let pc = peers[from];
+  if (data.type === 'candidate') {
+    // candidatos podem chegar antes da oferta: enfileira
+    if (!pc) {
+      if (!pendingCandidates[from]) pendingCandidates[from] = [];
+      pendingCandidates[from].push(data.candidate);
+      return;
+    }
+    try {
+      if (pc._ignoreOffer) return;
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } else {
+        if (!pendingCandidates[from]) pendingCandidates[from] = [];
+        pendingCandidates[from].push(data.candidate);
+      }
+    } catch (e) {
+      if (!pc._ignoreOffer) console.warn('[voz] erro ICE candidate', e);
+    }
+    return;
+  }
+
   try {
     if (data.type === 'offer') {
+      const offerCollision =
+        pc && (pc._makingOffer || pc.signalingState !== 'stable');
+      pc = pc || getPeer(from, false);
+      pc._ignoreOffer = !pc._polite && offerCollision;
+      if (pc._ignoreOffer) {
+        console.log('[voz] oferta conflitante ignorada (impolite) de', from);
+        return;
+      }
       if (localStream) {
         const senders = pc.getSenders().map(s => s.track);
         localStream.getTracks().forEach(t => {
           if (!senders.includes(t)) pc.addTrack(t, localStream);
         });
       }
+      if (offerCollision) {
+        await pc.setLocalDescription({ type: 'rollback' });
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
       await flushPendingCandidates(from, pc);
       const answer = await pc.createAnswer();
+      pc._settingAnswerPending = true;
       await pc.setLocalDescription(answer);
+      pc._settingAnswerPending = false;
       send({ t: 'signal', to: from, data: { type: 'answer', sdp: pc.localDescription } });
+      flushRenegQueue(from);
     } else if (data.type === 'answer') {
-      if (pc.signalingState !== 'stable') {
+      if (!pc) return;
+      if (pc.signalingState === 'have-local-offer') {
+        pc._settingAnswerPending = true;
         await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        pc._settingAnswerPending = false;
         await flushPendingCandidates(from, pc);
-      }
-    } else if (data.type === 'candidate' && data.candidate) {
-      if (pc.remoteDescription && pc.remoteDescription.type) {
-        await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
-      } else {
-        if (!pendingCandidates[from]) pendingCandidates[from] = [];
-        pendingCandidates[from].push(data.candidate);
+        flushRenegQueue(from);
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn('[voz] erro na sinalização de', from, data.type, e);
+    // recupera: se a descricao remota ficou corrompida, recria a conexao
+    if (data.type === 'offer' && peers[from]) recreatePeer(from, S.user.id > from);
+  }
+}
+
+// Badges visuais de status de conexao por participante
+let badgeTimer = null;
+function renderConnBadges() {
+  if (badgeTimer) return;
+  badgeTimer = setTimeout(() => {
+    badgeTimer = null;
+    document.querySelectorAll('[data-conn-uid]').forEach(el => {
+      const st = connStatus[el.dataset.connUid];
+      el.textContent = st === 'connected' ? '✓' :
+        st === 'failed' ? '⚠' :
+        st === 'retrying' ? '↻ tentando…' : '⏳ conectando…';
+      el.style.color = st === 'connected' ? '#3ba55c' :
+        st === 'connecting' || st === 'retrying' ? '#faa61a' : '#ed4245';
+      el.title = 'Status da conexão de voz com este usuário';
+    });
+  }, 120);
 }
 
 /* ---------- Utilidades ---------- */
@@ -2893,7 +3020,7 @@ async function startDmCall(userId) {
   if (f.status !== 'online') return toast('⚠ ' + (f.displayName || f.username) + ' está offline agora.');
   try {
     dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (e) { return toast('⚠ Permita o acesso ao microfone para ligar.'); }
+  } catch (e) { return openMicHelpModal(); }
   unlockAudioContext();
   S.dmCall = { peerId: userId, state: 'calling' };
   showDmCallUI();
@@ -2951,7 +3078,7 @@ async function acceptDmCall() {
     dmLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
     relayTo(from, { type: 'dm-decline' });
-    return toast('⚠ Sem acesso ao microfone.');
+    openMicHelpModal();
   }
   S.dmCall = { peerId: from, state: 'active', startedAt: Date.now() };
   relayTo(from, { type: 'dm-accept' });
@@ -2976,16 +3103,7 @@ function onDmCallAccepted(from) {
 
 function createDmPc(peerId, initiator) {
   if (dmPc) return dmPc;
-  dmPc = new RTCPeerConnection({
-    iceServers: [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-      {
-        urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:80?transport=tcp', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      }
-    ]
-  });
+  dmPc = new RTCPeerConnection({ iceServers: buildIceServers() });
   dmLocalStream.getTracks().forEach(t => dmPc.addTrack(t, dmLocalStream));
   dmPc.onicecandidate = e => {
     if (e.candidate) relayTo(peerId, { type: 'dm-candidate', candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });

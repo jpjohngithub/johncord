@@ -53,6 +53,24 @@ Para amigos acessarem na mesma rede, use seu IP local (ex: `http://192.168.x.x:3
 
 > 💡 **Dica:** O backend no Render também serve o frontend diretamente. Se você abrir a URL do Render no navegador, o JohnCord funciona completo por padrão.
 
+## 📞 Calls entre redes diferentes (TURN)
+
+Para a call funcionar 100% entre pessoas em **casas/redes diferentes**, é necessário um servidor TURN próprio (Discord, Meet e Zoom usam os deles):
+
+1. Crie conta grátis em **https://dashboard.metered.ca** (sem cartão de crédito)
+2. Crie um app e copie as credenciais TURN (usuário/senha)
+3. Cole em `frontend/config.js`:
+   ```js
+   window.JOHNCORD_TURN = {
+     urls: ['turn:standard.relay.metered.ca:80', 'turn:standard.relay.metered.ca:443'],
+     username: 'SEU_USUARIO',
+     credential: 'SUA_SENHA'
+   };
+   ```
+4. Faça deploy novamente
+
+Sem o TURN configurado, calls entre redes diferentes podem falhar dependendo do roteador — limitação física do WebRTC.
+
 ## 🧪 Testes
 
 Com o servidor rodando:
