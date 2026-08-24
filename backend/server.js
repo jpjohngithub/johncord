@@ -498,7 +498,8 @@ wss.on('connection', (ws) => {
       const code = String(d.code || '').trim();
       const srv = Object.values(db.servers).find(s => s.inviteCode === code);
       if (!srv) return send(ws, { t: 'err', error: 'Convite inválido ou expirado.' });
-      if (!srv.members.includes(me.id)) {
+      const isNewMember = !srv.members.includes(me.id);
+      if (isNewMember) {
         srv.members.push(me.id);
         const memRole = (srv.roles || []).find(r => r.name.toLowerCase().includes('membro'));
         if (memRole) {
@@ -507,8 +508,13 @@ wss.on('connection', (ws) => {
         }
         save();
       }
-      pushServerToMembers(srv);
       sendTo(me.id, { t: 'servers', servers: serversOf(me.id), openServer: srv.id });
+      for (const m of srv.members) {
+        if (m !== me.id) sendTo(m, { t: 'servers', servers: serversOf(m) });
+      }
+      if (isNewMember && srv.channels && srv.channels[0]) {
+        sysMsg(srv.id, srv.channels[0].id, `👋 **${me.username}** acabou de entrar no servidor!`);
+      }
       return;
     }
     if (d.t === 'regenerateInvite') {

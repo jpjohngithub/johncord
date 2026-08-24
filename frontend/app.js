@@ -391,6 +391,7 @@ function openServer(id) {
   renderRail();
   renderSidebar();
   renderHeader();
+  renderMessages();
   requestHistory();
   send({ t: 'members', serverId: id });
 }
@@ -1044,6 +1045,23 @@ function renderMessages() {
   S.lastAuthor = null;
   const key = `${S.view}:${S.channelId}`;
   const msgs = S.channelCache[key] || [];
+
+  if (msgs.length === 0 && S.view !== 'home') {
+    const srv = currentServer();
+    const ch = srv && srv.channels.find(c => c.id === S.channelId);
+    if (ch) {
+      const welcome = document.createElement('div');
+      welcome.className = 'channel-welcome';
+      welcome.style.cssText = 'padding: 36px 16px 20px;';
+      welcome.innerHTML = `
+        <div style="width:68px;height:68px;border-radius:50%;background:rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:14px;color:var(--header,#f2f3f5)">#</div>
+        <h2 style="font-size:24px;font-weight:800;color:var(--header,#f2f3f5);margin-bottom:6px">Bem-vindo a #${esc(ch.name)}!</h2>
+        <p style="color:var(--text-dim,#949ba4);font-size:14.5px">Este é o início do canal #${esc(ch.name)}.</p>
+      `;
+      box.appendChild(welcome);
+    }
+  }
+
   // Renderizacao em lote com DocumentFragment (1 unico reflow - muito mais rapido)
   const frag = document.createDocumentFragment();
   msgTarget = frag;
