@@ -541,6 +541,183 @@ input, textarea, select {
   transform: rotate(90deg) scale(1.05);
 }
 
+.rail-discover {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--ease-bounce);
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.rail-discover:hover, .rail-discover.active {
+  border-radius: var(--radius-lg);
+  background: var(--green);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 16px var(--green-glow);
+  transform: scale(1.05);
+}
+
+/* Estilos da Aba Descobrir Servidores */
+.discover-wrap {
+  padding: 32px 36px;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.discover-hero {
+  background: linear-gradient(135deg, rgba(88, 101, 242, 0.3) 0%, rgba(35, 165, 90, 0.2) 100%), #1e1f22;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 36px 32px;
+  margin-bottom: 28px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.discover-hero h1 {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--header, #f2f3f5);
+  margin-bottom: 8px;
+  letter-spacing: -0.4px;
+}
+
+.discover-hero p {
+  color: var(--text-dim, #949ba4);
+  font-size: 14.5px;
+  max-width: 600px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.discover-search-bar {
+  display: flex;
+  align-items: center;
+  background: #111214;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 4px 14px;
+  max-width: 520px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.discover-search-bar input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  padding: 10px 8px;
+  font-size: 15px;
+}
+
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.discover-card {
+  background: #2b2d31;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+.discover-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.discover-card-banner {
+  height: 90px;
+  background: var(--blurple, #5865f2);
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 16px;
+}
+
+.discover-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #1e1f22;
+  border: 3px solid #2b2d31;
+  transform: translateY(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.discover-card-body {
+  padding: 28px 16px 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.discover-card-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--header, #f2f3f5);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.discover-card-desc {
+  font-size: 13px;
+  color: var(--text-dim, #949ba4);
+  line-height: 1.4;
+  margin-bottom: 14px;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.discover-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 12px;
+  margin-top: auto;
+}
+
+.discover-members-count {
+  font-size: 12px;
+  color: var(--text-dim, #949ba4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ==========================================================================
    SIDEBAR LATERAL (CANAIS E DMS)
    ========================================================================== */
@@ -1079,6 +1256,81 @@ input, textarea, select {
   color: var(--text-dim);
   display: flex;
   align-items: center;
+}
+
+/* Banner de Call Ativa na Hub / Chat */
+.active-call-hub-card {
+  margin: 12px 16px;
+  background: linear-gradient(135deg, rgba(35, 165, 90, 0.15) 0%, rgba(88, 101, 242, 0.15) 100%), #1e1f22;
+  border: 1px solid rgba(35, 165, 90, 0.35);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.achc-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.achc-title {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--header);
+}
+
+.achc-avatars {
+  display: flex;
+  align-items: center;
+  margin-left: 4px;
+}
+
+.achc-avatar-item {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #1e1f22;
+  margin-left: -8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--blurple);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.achc-avatar-item:first-child {
+  margin-left: 0;
+}
+
+.achc-avatar-item:hover {
+  transform: translateY(-3px) scale(1.15);
+  z-index: 5;
+}
+
+.achc-avatar-item.speaking {
+  box-shadow: 0 0 0 2px #23a55a, 0 0 10px rgba(35, 165, 90, 0.8) !important;
+  border-color: #23a55a !important;
+}
+
+.chan-limit-badge {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .composer-wrap {

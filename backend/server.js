@@ -442,6 +442,8 @@ wss.on('connection', (ws) => {
       if (name.length < 2) return send(ws, { t: 'err', error: 'Nome muito curto.' });
       const icon = d.icon ? String(d.icon).slice(0, 3000) : name[0].toUpperCase();
       const banner = d.banner ? String(d.banner).slice(0, 3000) : '#5865f2';
+      const isPublic = d.isPublic === true;
+      const description = String(d.description || '').slice(0, 300).trim();
       
       const roleDono = {
         id: uid(),
@@ -479,6 +481,8 @@ wss.on('connection', (ws) => {
         name,
         icon,
         banner,
+        isPublic,
+        description,
         owner: me.id,
         inviteCode: uid().slice(0, 8),
         members: [me.id],
@@ -503,8 +507,59 @@ wss.on('connection', (ws) => {
       if (d.name) srv.name = String(d.name).trim().slice(0, 30);
       if (d.icon) srv.icon = String(d.icon).slice(0, 3000);
       if (d.banner) srv.banner = String(d.banner).slice(0, 3000);
+      if (d.isPublic !== undefined) srv.isPublic = !!d.isPublic;
+      if (d.description !== undefined) srv.description = String(d.description).slice(0, 300).trim();
       save();
       pushServerToMembers(srv);
+      return;
+    }
+
+    if (d.t === 'discoverServers') {
+      const q = String(d.q || '').trim().toLowerCase();
+      const publicServers = Object.values(db.servers).filter(s => {
+        if (!s.isPublic && s.id !== 'geral') return false;
+        if (!q) return true;
+        const nameMatch = (s.name || '').toLowerCase().includes(q);
+        const descMatch = (s.description || '').toLowerCase().includes(q);
+        return nameMatch || descMatch;
+      }).map(s => {
+        const onlineCount = s.members.filter(mid => byUser.has(mid)).length;
+        return {
+          id: s.id,
+          name: s.name,
+          icon: s.icon,
+          banner: s.banner || '#5865f2',
+          description: s.description || (s.id === 'geral' ? 'Servidor comunitário oficial do JohnCord para conversar e fazer amigos!' : ''),
+          isPublic: !!s.isPublic,
+          memberCount: (s.members || []).length,
+          onlineCount,
+          isMember: (s.members || []).includes(me.id)
+        };
+      });
+      send(ws, { t: 'discoverResults', servers: publicServers });
+      return;
+    }
+
+    if (d.t === 'joinServerDirect') {
+      const srv = db.servers[d.serverId];
+      if (!srv || (!srv.isPublic && srv.id !== 'geral')) return send(ws, { t: 'err', error: 'Servidor não encontrado ou é privado.' });
+      const isNewMember = !srv.members.includes(me.id);
+      if (isNewMember) {
+        srv.members.push(me.id);
+        const memRole = (srv.roles || []).find(r => r.name.toLowerCase().includes('membro'));
+        if (memRole) {
+          if (!srv.memberRoles) srv.memberRoles = {};
+          srv.memberRoles[me.id] = [memRole.id];
+        }
+        save();
+      }
+      sendTo(me.id, { t: 'servers', servers: serversOf(me.id), openServer: srv.id });
+      for (const m of srv.members) {
+        if (m !== me.id) sendTo(m, { t: 'servers', servers: serversOf(m) });
+      }
+      if (isNewMember && srv.channels && srv.channels[0]) {
+        sysMsg(srv.id, srv.channels[0].id, `👋 **${me.username}** descobriu e entrou no servidor!`);
+      }
       return;
     }
 
@@ -598,7 +653,14 @@ wss.on('connection', (ws) => {
       const name = String(d.name || '').trim().toLowerCase().replace(/[^a-z0-9áàâãéêíóôõúç\- ]/gi, '').slice(0, 25);
       if (!name) return;
       const type = d.type === 'voice' ? 'voice' : 'text';
-      const ch = { id: uid(), name: type === 'voice' ? String(d.name || name).slice(0, 25) : name, type, messages: [] };
+      const userLimit = type === 'voice' ? Math.max(0, parseInt(d.userLimit) || 0) : 0;
+      const ch = {
+        id: uid(),
+        name: type === 'voice' ? String(d.name || name).slice(0, 25) : name,
+        type,
+        userLimit,
+        messages: []
+      };
       srv.channels.push(ch);
       save();
       pushServerToMembers(srv);
@@ -773,9 +835,19 @@ wss.on('connection', (ws) => {
 
     // ----- Voz (WebRTC signaling) -----
     if (d.t === 'voiceJoin') {
+      const srv = db.servers[d.serverId];
+      if (srv && d.serverId !== 'dm') {
+        const ch = (srv.channels || []).find(c => c.id === d.channelId);
+        if (ch && ch.userLimit && ch.userLimit > 0) {
+          const currentCount = [...voice.entries()].filter(([u, v]) => v.serverId === d.serverId && v.channelId === d.channelId && u !== me.id).length;
+          if (currentCount >= ch.userLimit && srv.owner !== me.id) {
+            return send(ws, { t: 'err', error: `Esta sala de voz está lotada (limite máximo de ${ch.userLimit} participantes).` });
+          }
+        }
+      }
+
       const prev = voice.get(me.id);
       voice.set(me.id, { serverId: d.serverId, channelId: d.channelId, muted: false });
-      const srv = db.servers[d.serverId];
       if (prev && (prev.serverId !== d.serverId || prev.channelId !== d.channelId)) {
         const psrv = db.servers[prev.serverId];
         if (psrv) sysMsg(prev.serverId, prev.channelId, `**${me.username}** saiu da call.`);

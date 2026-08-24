@@ -70,6 +70,7 @@ const S = {
   lastAuthor: null,
   lastTs: 0,
   dmCall: null,            // {peerId, state:'ringing'|'active'|'calling', pc, startedAt}
+  discoverList: []
 };
 
 const $ = id => document.getElementById(id);
@@ -254,6 +255,13 @@ function handle(d) {
       break;
     case 'members':
       if (S.view === d.serverId) { S.members = d.members; renderMemberList(); }
+      break;
+    case 'discoverResults':
+      S.discoverList = d.servers || [];
+      if (S.view === 'discover') {
+        const curQ = $('discoverSearchInput') ? $('discoverSearchInput').value : '';
+        renderDiscoverView(curQ);
+      }
       break;
     case 'typing':
       if (S.view === d.serverId && S.channelId === d.channelId)
@@ -505,6 +513,146 @@ function openHome() {
   renderSidebar();
   renderHeader();
   renderHomeMain();
+}
+
+function openDiscover() {
+  S.view = 'discover';
+  S.dmId = null;
+  if ($('chatView')) $('chatView').style.display = 'flex';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+  renderRail();
+  renderSidebar();
+  renderHeader();
+  renderDiscoverView();
+  send({ t: 'discoverServers' });
+}
+
+function renderDiscoverView(filterQuery = '') {
+  $('memberList').innerHTML = '';
+  const box = $('messages');
+  box.innerHTML = '';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'discover-wrap';
+
+  // Hero Banner de Boas-Vindas
+  const hero = document.createElement('div');
+  hero.className = 'discover-hero';
+  hero.innerHTML = `
+    <h1>🧭 Encontre sua comunidade no JohnCord</h1>
+    <p>Explore servidores públicos sobre jogos, tecnologia, música, bate-papo e faça novos amigos!</p>
+    <div class="discover-search-bar">
+      <span style="font-size:18px;margin-right:6px">🔍</span>
+      <input type="text" id="discoverSearchInput" placeholder="Pesquisar servidores públicos por nome ou assunto..." value="${esc(filterQuery)}">
+      ${filterQuery ? `<button id="clearDiscoverSearch" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px">✕</button>` : ''}
+    </div>
+  `;
+  wrap.appendChild(hero);
+
+  const gridTitle = document.createElement('div');
+  gridTitle.style.cssText = 'font-size:14px;font-weight:800;text-transform:uppercase;color:var(--text-dim,#949ba4);letter-spacing:0.6px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between';
+  
+  const q = filterQuery.trim().toLowerCase();
+  const list = (S.discoverList || []).filter(s => {
+    if (!q) return true;
+    return (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q);
+  });
+
+  gridTitle.innerHTML = `
+    <span>Comunidades em Destaque (${list.length})</span>
+    <button class="btn btn-ghost btn-small" id="btnRefreshDiscover" style="font-size:12px">🔄 Atualizar</button>
+  `;
+  wrap.appendChild(gridTitle);
+
+  if (list.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:60px 20px;text-align:center;color:var(--text-dim,#949ba4);font-size:15px;background:#1e1f22;border-radius:12px;border:1px dashed rgba(255,255,255,0.08)';
+    empty.innerHTML = `
+      <div style="font-size:42px;margin-bottom:12px">🔍</div>
+      <div style="font-weight:700;color:var(--header,#f2f3f5);font-size:18px;margin-bottom:6px">Nenhum servidor público encontrado</div>
+      <div>Tente buscar por outro termo ou crie o seu próprio servidor público!</div>
+    `;
+    wrap.appendChild(empty);
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'discover-grid';
+
+    list.forEach(srv => {
+      const card = document.createElement('div');
+      card.className = 'discover-card';
+
+      const srvIcon = isImgUrl(srv.icon)
+        ? `<img src="${esc(srv.icon)}" alt="Icon" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
+        : (srv.icon || srv.name[0].toUpperCase());
+
+      const bannerStyle = isImgUrl(srv.banner)
+        ? `background:url("${esc(srv.banner)}") center/cover no-repeat;`
+        : `background:${srv.banner || '#5865f2'};`;
+
+      const isMeIn = srv.isMember || S.servers.some(s => s.id === srv.id);
+      const desc = srv.description || (srv.id === 'geral' ? 'Servidor comunitário oficial do JohnCord para conversar e fazer amigos!' : 'Comunidade aberta do JohnCord para conversar e interagir.');
+
+      card.innerHTML = `
+        <div class="discover-card-banner" style="${bannerStyle}">
+          <div class="discover-card-icon">${srvIcon}</div>
+        </div>
+        <div class="discover-card-body">
+          <div class="discover-card-title">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(srv.name)}</span>
+            <span style="font-size:11px;background:rgba(35,165,90,0.15);color:var(--green,#23a55a);padding:2px 6px;border-radius:4px;font-weight:700">🌐 Público</span>
+          </div>
+          <div class="discover-card-desc">${esc(desc)}</div>
+          <div class="discover-card-footer">
+            <div class="discover-members-count">
+              <span style="width:8px;height:8px;border-radius:50%;background:var(--green,#23a55a);display:inline-block"></span>
+              <span>${srv.onlineCount || 1} online</span>
+              <span>·</span>
+              <span>👥 ${srv.memberCount || 1} membros</span>
+            </div>
+            <button class="btn ${isMeIn ? 'btn-ghost' : 'btn-primary'} btn-small" id="btnCardJoin_${srv.id}" style="padding:6px 12px;font-size:12.5px">
+              ${isMeIn ? 'Abrir Servidor' : '➕ Entrar'}
+            </button>
+          </div>
+        </div>
+      `;
+
+      const btnAction = card.querySelector(`#btnCardJoin_${srv.id}`);
+      if (btnAction) {
+        btnAction.onclick = () => {
+          if (isMeIn) {
+            openServer(srv.id);
+          } else {
+            send({ t: 'joinServerDirect', serverId: srv.id });
+            toast(`Entrando em ${srv.name}...`);
+          }
+        };
+      }
+
+      grid.appendChild(card);
+    });
+
+    wrap.appendChild(grid);
+  }
+
+  box.appendChild(wrap);
+
+  // Listeners de Busca e Atualização
+  const sInput = wrap.querySelector('#discoverSearchInput');
+  if (sInput) {
+    sInput.focus();
+    sInput.setSelectionRange(sInput.value.length, sInput.value.length);
+    sInput.oninput = e => {
+      renderDiscoverView(e.target.value);
+    };
+  }
+  const sClear = wrap.querySelector('#clearDiscoverSearch');
+  if (sClear) sClear.onclick = () => renderDiscoverView('');
+
+  const refBtn = wrap.querySelector('#btnRefreshDiscover');
+  if (refBtn) refBtn.onclick = () => {
+    send({ t: 'discoverServers', q: filterQuery });
+    toast('Atualizando comunidades...');
+  };
 }
 
 function openDm(dmId) {
@@ -829,6 +977,8 @@ function renderRail() {
   const list = $('serverList');
   list.innerHTML = '';
   $('btnHome').classList.toggle('active', S.view === 'home');
+  const discBtn = $('btnDiscover');
+  if (discBtn) discBtn.classList.toggle('active', S.view === 'discover');
   S.servers.forEach(srv => {
     const div = document.createElement('div');
     div.className = 'server-icon' + (srv.permanent ? ' permanent' : '') + (S.view === srv.id ? ' active' : '');
@@ -846,6 +996,22 @@ function renderSidebar() {
   const body = $('channelView');
   const header = $('sidebarHeader');
   body.innerHTML = '';
+
+  if (S.view === 'discover') {
+    header.textContent = 'Descobrir';
+    const discBtn = document.createElement('div');
+    discBtn.className = 'chan-item active';
+    discBtn.style.padding = '8px 10px';
+    discBtn.innerHTML = `<span>🧭</span><span style="font-weight:700">Comunidades Públicas</span>`;
+    discBtn.onclick = openDiscover;
+    body.appendChild(discBtn);
+    
+    const infoBox = document.createElement('div');
+    infoBox.style.cssText = 'padding:14px 12px;font-size:12.5px;color:var(--text-dim,#949ba4);line-height:1.5';
+    infoBox.innerHTML = `Encontre comunidades públicas no JohnCord e junte-se a elas com apenas um clique!`;
+    body.appendChild(infoBox);
+    return;
+  }
 
   if (S.view === 'home') {
     header.textContent = 'Início';
@@ -958,10 +1124,18 @@ function renderSidebar() {
 
   srv.channels.filter(c => c.type === 'voice').forEach(ch => {
     const inThis = S.voice && S.voice.serverId === srv.id && S.voice.channelId === ch.id;
+    const users = ((S.voiceStates[srv.id] || {})[ch.id]) || [];
     const item = document.createElement('div');
     item.className = 'chan-item' + (inThis ? ' active' : '');
     item.style.cursor = 'pointer';
-    item.innerHTML = `🔊 <span style="font-weight:600">${esc(ch.name)}</span>`;
+    
+    let limitBadge = '';
+    if (ch.userLimit && ch.userLimit > 0) {
+      const isFull = users.length >= ch.userLimit;
+      limitBadge = `<span class="chan-limit-badge" style="margin-left:auto;color:${isFull ? '#f23f43' : 'var(--text-dim)'};font-weight:700">${users.length}/${ch.userLimit}</span>`;
+    }
+
+    item.innerHTML = `🔊 <span style="font-weight:600">${esc(ch.name)}</span>${limitBadge}`;
     item.onclick = () => joinVoice(srv.id, ch.id);
     body.appendChild(item);
 
@@ -1020,6 +1194,22 @@ function renderSidebar() {
 function renderHeader() {
   const btnCall = $('btnCallDm');
   const composerWrap = document.querySelector('.composer-wrap');
+
+  if (S.view === 'discover') {
+    if (composerWrap) composerWrap.style.display = 'none';
+    $('chanIcon').textContent = '🧭';
+    $('chanName').textContent = 'Descobrir Comunidades';
+    $('btnInvite').style.display = 'none';
+    $('btnMembers').style.display = 'none';
+    if (btnCall) btnCall.style.display = 'none';
+    const headerActions = document.querySelector('.header-actions');
+    if (headerActions) {
+      headerActions.innerHTML = `
+        <button class="btn btn-primary btn-small" onclick="document.getElementById('btnAddServer').click()">➕ Criar Servidor Público</button>
+      `;
+    }
+    return;
+  }
 
   if (S.view === 'home') {
     if (S.dmId) {
@@ -1111,6 +1301,100 @@ function requestHistory() {
   if (S.view !== 'home' && S.channelId) send({ t: 'history', serverId: S.view, channelId: S.channelId });
 }
 
+function renderActiveCallBanner(container) {
+  if (!container) return;
+
+  let activeVoiceInfo = null;
+
+  if (S.view === 'home' && S.dmId) {
+    const users = (S.voiceStates['dm'] && S.voiceStates['dm'][S.dmId]) || [];
+    if (users.length > 0) {
+      const dm = S.dmList.find(x => x.dmId === S.dmId);
+      const dmName = dm ? (dm.user.displayName || dm.user.username) : 'Amigo';
+      activeVoiceInfo = {
+        title: `Chamada com @${dmName}`,
+        serverId: 'dm',
+        channelId: S.dmId,
+        users
+      };
+    }
+  } else if (S.view !== 'home' && S.view !== 'discover') {
+    const srv = currentServer();
+    if (srv && srv.channels) {
+      const voiceChans = srv.channels.filter(c => c.type === 'voice');
+      for (const vch of voiceChans) {
+        const users = (S.voiceStates[srv.id] && S.voiceStates[srv.id][vch.id]) || [];
+        if (users.length > 0) {
+          activeVoiceInfo = {
+            title: `Call no canal 🔊 ${vch.name}`,
+            serverId: srv.id,
+            channelId: vch.id,
+            users
+          };
+          break;
+        }
+      }
+    }
+  }
+
+  if (!activeVoiceInfo || !activeVoiceInfo.users.length) return;
+
+  const inThisCall = S.voice && S.voice.serverId === activeVoiceInfo.serverId && S.voice.channelId === activeVoiceInfo.channelId;
+
+  const card = document.createElement('div');
+  card.className = 'active-call-hub-card';
+
+  let avatarsHtml = '';
+  activeVoiceInfo.users.forEach(u => {
+    const disp = u.displayName || u.username || '?';
+    let avContent = (disp[0] || '?').toUpperCase();
+    let avStyle = `background:${u.color || '#5865f2'}`;
+    if (isImgUrl(u.avatar)) {
+      avContent = `<img src="${esc(u.avatar)}" alt="Avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+      avStyle = `background:transparent`;
+    } else if (u.avatar && u.avatar.length <= 4) {
+      avContent = u.avatar;
+    }
+    avatarsHtml += `
+      <div class="achc-avatar-item" data-uid="${u.id}" style="${avStyle}" title="${esc(disp)} (@${esc(u.username)})">
+        ${avContent}
+      </div>
+    `;
+  });
+
+  card.innerHTML = `
+    <div class="achc-left">
+      <span class="badge-live-pulse">🔴 AO VIVO</span>
+      <span class="achc-title">${esc(activeVoiceInfo.title)}</span>
+      <div class="achc-avatars">
+        ${avatarsHtml}
+      </div>
+      <span style="font-size:12px;color:var(--text-dim);font-weight:600">(${activeVoiceInfo.users.length} na call)</span>
+    </div>
+    <button class="btn ${inThisCall ? 'btn-ghost' : 'btn-primary'} btn-small achc-btn-action" style="font-size:12.5px;padding:6px 14px">
+      ${inThisCall ? '📞 Abrir Tela da Call' : '🟢 Entrar na Call'}
+    </button>
+  `;
+
+  card.querySelector('.achc-btn-action').onclick = () => {
+    if (inThisCall) {
+      openVoiceRoomView();
+    } else {
+      joinVoice(activeVoiceInfo.serverId, activeVoiceInfo.channelId);
+      openVoiceRoomView();
+    }
+  };
+
+  card.querySelectorAll('.achc-avatar-item').forEach(el => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      openUserProfileModal(el.dataset.uid);
+    };
+  });
+
+  container.prepend(card);
+}
+
 function renderMessages() {
   const box = $('messages');
   box.innerHTML = '';
@@ -1140,6 +1424,8 @@ function renderMessages() {
   for (const m of msgs) appendMsg(m, { noScroll: true });
   msgTarget = null;
   box.appendChild(frag);
+
+  renderActiveCallBanner(box);
   scrollToBottomForce();
 }
 
@@ -1148,28 +1434,6 @@ function renderDmMessages() {
   box.innerHTML = '';
   S.lastAuthor = null;
 
-  const dmVoiceUsers = (S.voiceStates['dm'] && S.voiceStates['dm'][S.dmId]) || [];
-  if (dmVoiceUsers.length > 0) {
-    const inCall = S.voice && S.voice.serverId === 'dm' && S.voice.channelId === S.dmId;
-    const banner = document.createElement('div');
-    banner.className = 'dm-voice-banner';
-    banner.style.cssText = 'background:rgba(35,165,90,0.15);border:1px solid #23a55a;border-radius:8px;padding:12px 16px;margin:8px 16px 16px;display:flex;align-items:center;justify-content:space-between;color:var(--header)';
-    banner.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px">
-        <span class="badge-live-pulse" style="font-size:12px;padding:3px 8px">📞 CALL ATIVA</span>
-        <span style="font-weight:600;font-size:14px">${dmVoiceUsers.length} ${dmVoiceUsers.length === 1 ? 'pessoa' : 'pessoas'} na chamada privada</span>
-      </div>
-      <div>
-        ${inCall ? '<button class="btn btn-primary" id="dmOpenCallBtn" style="background:#23a55a;padding:6px 14px">👁️ Abrir Tela da Call</button>' : '<button class="btn btn-primary" id="dmJoinCallBtn" style="background:#23a55a;padding:6px 14px">📞 Entrar na Call</button>'}
-      </div>
-    `;
-    const openBtn = banner.querySelector('#dmOpenCallBtn');
-    if (openBtn) openBtn.onclick = openVoiceRoomView;
-    const joinBtn = banner.querySelector('#dmJoinCallBtn');
-    if (joinBtn) joinBtn.onclick = () => { joinVoice('dm', S.dmId); openVoiceRoomView(); };
-    box.appendChild(banner);
-  }
-
   const dm = S.dms[S.dmId];
   const msgs = (dm && dm.messages) || [];
   const frag = document.createDocumentFragment();
@@ -1177,6 +1441,8 @@ function renderDmMessages() {
   for (const m of msgs) appendMsg(m, { noScroll: true });
   msgTarget = null;
   box.appendChild(frag);
+
+  renderActiveCallBanner(box);
   scrollToBottomForce();
 }
 
@@ -2105,6 +2371,27 @@ $('btnAddServer').onclick = () => {
       ${colors.map(c => `<div class="color-dot${c === selectedBanner ? ' active' : ''}" data-color="${c}" style="width:26px;height:26px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c === selectedBanner ? '#fff' : 'transparent'};transition:.15s"></div>`).join('')}
     </div>
 
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">TIPO DE SERVIDOR / PRIVACIDADE:</label>
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <label style="flex:1;display:flex;align-items:center;gap:8px;background:#1e1f22;padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid #5865f2" id="lblPrivPublic">
+        <input type="radio" name="srvPrivOpt" id="srvPrivPublic" value="public" checked>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--header)">🌐 Público</div>
+          <div style="font-size:11px;color:var(--text-dim)">Aparece na aba Descobrir</div>
+        </div>
+      </label>
+      <label style="flex:1;display:flex;align-items:center;gap:8px;background:#1e1f22;padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid rgba(255,255,255,0.08)" id="lblPrivPrivate">
+        <input type="radio" name="srvPrivOpt" id="srvPrivPrivate" value="private">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--header)">🔒 Privado</div>
+          <div style="font-size:11px;color:var(--text-dim)">Apenas com convite</div>
+        </div>
+      </label>
+    </div>
+
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">DESCRIÇÃO DA COMUNIDADE (OPCIONAL):</label>
+    <textarea class="input" id="mSrvDesc" placeholder="Explique sobre o que é o seu servidor para atrair membros..." rows="2" style="resize:vertical;margin-bottom:14px"></textarea>
+
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="joinByCodeModal()">Entrar com Convite</button>
       <button class="btn btn-primary" id="mCreate">Criar Servidor</button>
@@ -2120,6 +2407,22 @@ $('btnAddServer').onclick = () => {
     } else {
       prevIcon.textContent = selectedIcon;
     }
+  }
+
+  const radPub = $('srvPrivPublic');
+  const radPriv = $('srvPrivPrivate');
+  const lblPub = $('lblPrivPublic');
+  const lblPriv = $('lblPrivPrivate');
+
+  if (radPub && radPriv) {
+    radPub.onchange = () => {
+      lblPub.style.borderColor = '#5865f2';
+      lblPriv.style.borderColor = 'rgba(255,255,255,0.08)';
+    };
+    radPriv.onchange = () => {
+      lblPriv.style.borderColor = '#5865f2';
+      lblPub.style.borderColor = 'rgba(255,255,255,0.08)';
+    };
   }
 
   $('mSrvName').oninput = e => {
@@ -2149,10 +2452,35 @@ $('btnAddServer').onclick = () => {
 
   $('mCreate').onclick = () => {
     const name = $('mSrvName').value.trim();
+    const isPublic = $('srvPrivPublic') ? $('srvPrivPublic').checked : false;
+    const description = $('mSrvDesc') ? $('mSrvDesc').value.trim() : '';
     if (name.length >= 2) {
-      send({ t: 'createServer', name, icon: selectedIcon, banner: selectedBanner });
+      const tempId = 'temp_srv_' + Date.now();
+      const txtId = 'temp_ch_txt_' + Date.now();
+      const voxId = 'temp_ch_vox_' + Date.now();
+      const tempSrv = {
+        id: tempId,
+        name,
+        icon: selectedIcon,
+        banner: selectedBanner,
+        isPublic,
+        description,
+        owner: S.user?.id,
+        inviteCode: '...',
+        members: [S.user?.id],
+        channels: [
+          { id: txtId, name: 'geral', type: 'text', messages: [] },
+          { id: voxId, name: 'Geral', type: 'voice', userLimit: 0, messages: [] }
+        ],
+        roles: [],
+        memberRoles: {}
+      };
+      S.servers.push(tempSrv);
+      renderRail();
+      openServer(tempId);
       closeModal();
-      toast('Criando servidor...');
+      toast('✓ Servidor criado instantaneamente!');
+      send({ t: 'createServer', name, icon: selectedIcon, banner: selectedBanner, isPublic, description });
     }
   };
   $('mSrvName').focus();
@@ -2303,6 +2631,27 @@ function modalServerManage(serverId, initialTab = 'overview') {
           <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">COR OU URL DO BANNER:</label>
           <input class="input" id="smSrvBanner" value="${esc(bannerColor)}" placeholder="Cor #5865f2 ou link https://...">
 
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">TIPO DE SERVIDOR / PRIVACIDADE:</label>
+          <div style="display:flex;gap:10px;margin-bottom:14px">
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#1e1f22;padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid ${srv.isPublic ? '#5865f2' : 'rgba(255,255,255,0.08)'}" id="smLblPrivPublic">
+              <input type="radio" name="smSrvPrivOpt" id="smSrvPrivPublic" value="public" ${srv.isPublic ? 'checked' : ''}>
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--header)">🌐 Público</div>
+                <div style="font-size:11px;color:var(--text-dim)">Visível no Descobrir</div>
+              </div>
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:#1e1f22;padding:10px 12px;border-radius:8px;cursor:pointer;border:1px solid ${!srv.isPublic ? '#5865f2' : 'rgba(255,255,255,0.08)'}" id="smLblPrivPrivate">
+              <input type="radio" name="smSrvPrivOpt" id="smSrvPrivPrivate" value="private" ${!srv.isPublic ? 'checked' : ''}>
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--header)">🔒 Privado</div>
+                <div style="font-size:11px;color:var(--text-dim)">Apenas com convite</div>
+              </div>
+            </label>
+          </div>
+
+          <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">DESCRIÇÃO DA COMUNIDADE:</label>
+          <textarea class="input" id="smSrvDesc" placeholder="Explique sobre o que é o seu servidor para atrair membros..." rows="2" style="resize:vertical">${esc(srv.description || '')}</textarea>
+
           <div class="modal-actions" style="margin-top:14px">
             ${isOwner ? `<button class="btn btn-danger" id="smBtnDeleteSrv">🗑️ Excluir Servidor</button>` : ''}
             <button class="btn btn-primary" id="smBtnSaveOverview">Salvar Alterações</button>
@@ -2396,12 +2745,40 @@ function modalServerManage(serverId, initialTab = 'overview') {
 
     // Overview actions
     if ($('smBtnSaveOverview')) {
+      const smRadPub = $('smSrvPrivPublic');
+      const smRadPriv = $('smSrvPrivPrivate');
+      const smLblPub = $('smLblPrivPublic');
+      const smLblPriv = $('smLblPrivPrivate');
+
+      if (smRadPub && smRadPriv) {
+        smRadPub.onchange = () => {
+          smLblPub.style.borderColor = '#5865f2';
+          smLblPriv.style.borderColor = 'rgba(255,255,255,0.08)';
+        };
+        smRadPriv.onchange = () => {
+          smLblPriv.style.borderColor = '#5865f2';
+          smLblPub.style.borderColor = 'rgba(255,255,255,0.08)';
+        };
+      }
+
       $('smBtnSaveOverview').onclick = () => {
         const newName = $('smSrvName').value.trim();
         const newIcon = $('smSrvIcon').value.trim() || srv.name[0].toUpperCase();
-        send({ t: 'updateServer', serverId: srv.id, name: newName, icon: newIcon });
+        const newBanner = $('smSrvBanner') ? $('smSrvBanner').value.trim() : srv.banner;
+        const isPublic = $('smSrvPrivPublic') ? $('smSrvPrivPublic').checked : false;
+        const description = $('smSrvDesc') ? $('smSrvDesc').value.trim() : '';
+
+        send({
+          t: 'updateServer',
+          serverId: srv.id,
+          name: newName,
+          icon: newIcon,
+          banner: newBanner,
+          isPublic,
+          description
+        });
         closeModal();
-        toast('Servidor atualizado!');
+        toast('Configurações do servidor atualizadas!');
       };
     }
     if ($('smBtnDeleteSrv')) {
@@ -2653,14 +3030,48 @@ $('btnInvite').onclick = () => {
 function modalCreateChannel(type) {
   const isVoice = type === 'voice';
   openModal(`
-    <h2>Criar canal de ${isVoice ? 'voz' : 'texto'}</h2>
-    <input class="input" id="mChName" placeholder="${isVoice ? 'Nome do canal (ex: Call 2)' : 'nome-do-canal'}" maxlength="25">
+    <h2>Criar canal de ${isVoice ? 'voz 🔊' : 'texto #'}</h2>
+    <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:4px">NOME DO CANAL:</label>
+    <input class="input" id="mChName" placeholder="${isVoice ? 'Ex: Call dos Cria, Squad, Sala 2' : 'ex: geral, memes, avisos'}" maxlength="25">
+    
+    ${isVoice ? `
+      <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-top:12px;margin-bottom:4px">LIMITE DE PESSOAS NA CALL:</label>
+      <div style="display:flex;align-items:center;gap:12px;background:#1e1f22;padding:8px 12px;border-radius:8px;margin-bottom:8px">
+        <input type="range" id="mChUserLimit" min="0" max="99" value="0" style="flex:1;cursor:pointer">
+        <span id="mChUserLimitLabel" style="font-weight:800;font-size:13.5px;color:var(--header);min-width:85px;text-align:right">Ilimitado ♾️</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="btn btn-ghost btn-small" type="button" id="btnLim0" style="font-size:11.5px">Ilimitado</button>
+        <button class="btn btn-ghost btn-small" type="button" id="btnLim2" style="font-size:11.5px">2 (Duo)</button>
+        <button class="btn btn-ghost btn-small" type="button" id="btnLim5" style="font-size:11.5px">5 (Squad)</button>
+        <button class="btn btn-ghost btn-small" type="button" id="btnLim10" style="font-size:11.5px">10 pessoas</button>
+        <button class="btn btn-ghost btn-small" type="button" id="btnLim25" style="font-size:11.5px">25 pessoas</button>
+      </div>
+    ` : ''}
+
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-primary" id="mChGo">Criar canal</button>
     </div>`);
+
+  if (isVoice) {
+    const r = $('mChUserLimit');
+    const lbl = $('mChUserLimitLabel');
+    const updateLimitLabel = () => {
+      const v = parseInt(r.value) || 0;
+      lbl.textContent = v === 0 ? 'Ilimitado ♾️' : `${v} pessoas`;
+    };
+    r.oninput = updateLimitLabel;
+    $('btnLim0').onclick = () => { r.value = 0; updateLimitLabel(); };
+    $('btnLim2').onclick = () => { r.value = 2; updateLimitLabel(); };
+    $('btnLim5').onclick = () => { r.value = 5; updateLimitLabel(); };
+    $('btnLim10').onclick = () => { r.value = 10; updateLimitLabel(); };
+    $('btnLim25').onclick = () => { r.value = 25; updateLimitLabel(); };
+  }
+
   $('mChGo').onclick = () => {
     const name = $('mChName').value.trim();
+    const userLimit = isVoice && $('mChUserLimit') ? (parseInt($('mChUserLimit').value) || 0) : 0;
     if (name) {
       const srv = currentServer();
       if (srv) {
@@ -2668,19 +3079,22 @@ function modalCreateChannel(type) {
           id: 'temp_ch_' + Date.now(),
           name: type === 'voice' ? name : name.toLowerCase().replace(/[^a-z0-9áàâãéêíóôõúç\- ]/gi, ''),
           type: type === 'voice' ? 'voice' : 'text',
+          userLimit,
           messages: []
         };
         srv.channels.push(tempCh);
         renderSidebar();
       }
-      send({ t: 'createChannel', serverId: S.view, name, type });
+      send({ t: 'createChannel', serverId: S.view, name, type, userLimit });
       closeModal();
+      toast('✓ Canal criado com sucesso!');
     }
   };
 }
 
 /* ---------- Botões do usuário ---------- */
 $('btnHome').onclick = openHome;
+if ($('btnDiscover')) $('btnDiscover').onclick = openDiscover;
 $('btnMembers').onclick = () => {
   const ml = $('memberList');
   ml.style.display = ml.style.display === 'none' ? '' : 'none';
