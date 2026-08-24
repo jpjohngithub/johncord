@@ -179,7 +179,13 @@ function handle(d) {
       break;
     case 'msgNew':
       cacheMsg(`${d.serverId}:${d.channelId}`, d.msg);
-      if (S.view === d.serverId && S.channelId === d.channelId) appendMsg(d.msg);
+      if (S.view === d.serverId && S.channelId === d.channelId) {
+        const welcome = document.querySelector('.channel-welcome');
+        if (welcome) welcome.remove();
+        appendMsg(d.msg);
+      } else {
+        if (d.msg.userId !== S.user?.id) playNotifySound();
+      }
       break;
     case 'dmNew':
       if (!S.dms[d.dmId]) S.dms[d.dmId] = { messages: [] };
@@ -188,7 +194,10 @@ function handle(d) {
         if (S.dmId !== d.dmId) { ensureDmInList(d.withUserId, d.dmId); S.dmId = d.dmId; renderSidebar(); renderHeader(); }
         renderDmMessages();
       } else {
-        toast(`💬 Nova mensagem de ${d.msg.username}`);
+        if (d.msg.userId !== S.user?.id) {
+          toast(`💬 Nova mensagem de ${d.msg.displayName || d.msg.username}`);
+          playNotifySound();
+        }
       }
       ensureDmInList(d.withUserId, d.dmId);
       break;
@@ -2223,6 +2232,24 @@ function unlockAudioContext() {
     if (globalAudioCtx && globalAudioCtx.state === 'suspended') {
       globalAudioCtx.resume();
     }
+  } catch (e) {}
+}
+
+function playNotifySound() {
+  try {
+    unlockAudioContext();
+    if (!globalAudioCtx) return;
+    const osc = globalAudioCtx.createOscillator();
+    const gain = globalAudioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, globalAudioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, globalAudioCtx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.08, globalAudioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, globalAudioCtx.currentTime + 0.15);
+    osc.connect(gain);
+    gain.connect(globalAudioCtx.destination);
+    osc.start();
+    osc.stop(globalAudioCtx.currentTime + 0.15);
   } catch (e) {}
 }
 
