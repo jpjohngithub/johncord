@@ -881,11 +881,13 @@ function renderSidebar() {
     (canManageChans ? `<button title="Criar canal de voz">＋</button>` : '');
   if (sec.querySelector('button')) sec.querySelector('button').onclick = () => modalCreateChannel('voice');
   body.appendChild(sec);
+
   srv.channels.filter(c => c.type === 'voice').forEach(ch => {
     const inThis = S.voice && S.voice.serverId === srv.id && S.voice.channelId === ch.id;
     const item = document.createElement('div');
     item.className = 'chan-item' + (inThis ? ' active' : '');
-    item.innerHTML = `🔊 <span>${esc(ch.name)}</span>`;
+    item.style.cursor = 'pointer';
+    item.innerHTML = `🔊 <span style="font-weight:600">${esc(ch.name)}</span>`;
     item.onclick = () => joinVoice(srv.id, ch.id);
     body.appendChild(item);
 
@@ -893,6 +895,8 @@ function renderSidebar() {
     if (users.length) {
       const wrap = document.createElement('div');
       wrap.className = 'voice-users';
+      wrap.style.cssText = 'padding-left:22px;margin-top:3px;margin-bottom:6px;display:flex;flex-direction:column;gap:3px';
+
       users.forEach(u => {
         const vu = document.createElement('div');
         const isMuted = u.muted;
@@ -900,14 +904,38 @@ function renderSidebar() {
         const isLive = u.screenSharing;
         vu.className = 'voice-user vu-item' + (isMuted ? ' muted' : '') + (isDeaf ? ' deafened' : '');
         vu.dataset.uid = u.id;
-        const liveBadge = isLive ? `<span class="badge-live">AO VIVO</span>` : '';
+        vu.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;font-size:13px;color:var(--header,#f2f3f5);cursor:pointer';
+        
+        const av = document.createElement('div');
+        av.className = 'user-avatar';
+        av.style.cssText = 'width:22px;height:22px;font-size:10px;flex-shrink:0';
+        setAvatar(av, u);
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'vu-name';
+        nameSpan.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-weight:500';
+        nameSpan.textContent = u.displayName || u.username;
+
+        const liveBadge = isLive ? `<span class="badge-live" style="font-size:9px;padding:1px 4px;margin-right:2px">AO VIVO</span>` : '';
         const stateIcon = isDeaf ? '🎧' : (isMuted ? '🔇' : '');
         const isMe = S.user && u.id === S.user.id;
-        const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume">🔊</button>` : '';
+        const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume" style="font-size:11px;padding:2px 4px;border-radius:3px;background:rgba(255,255,255,0.08);margin-left:4px">🔊</button>` : '';
 
-        vu.innerHTML = `<span class="dot"></span><span class="vu-name">${esc(u.username)}</span><span class="vu-actions">${liveBadge}${stateIcon}${volBtn}<span data-conn-uid="${u.id}" class="conn-badge"></span></span>`;
+        vu.appendChild(av);
+        vu.appendChild(nameSpan);
+        vu.innerHTML += `<span class="vu-actions" style="margin-left:auto;display:flex;align-items:center">${liveBadge}${stateIcon}${volBtn}</span>`;
+        
         const b = vu.querySelector('.vu-btn');
-        if (b) b.onclick = e => { e.stopPropagation(); openVolumeModal(u.id, u.username); };
+        if (b) b.onclick = e => { e.stopPropagation(); openVolumeModal(u.id, u.displayName || u.username); };
+
+        vu.onclick = () => {
+          if (S.voice && S.voice.serverId === srv.id && S.voice.channelId === ch.id) {
+            openVoiceRoomView();
+          } else {
+            joinVoice(srv.id, ch.id);
+          }
+        };
+
         wrap.appendChild(vu);
       });
       body.appendChild(wrap);
@@ -2331,11 +2359,37 @@ async function joinVoice(serverId, channelId) {
     S.muted = false;
     S.deafened = false;
     S.screenSharing = false;
+
+    // Atualização otimista de participantes na sidebar
+    if (!S.voiceStates[serverId]) S.voiceStates[serverId] = {};
+    if (!S.voiceStates[serverId][channelId]) S.voiceStates[serverId][channelId] = [];
+    if (S.user && !S.voiceStates[serverId][channelId].some(u => u.id === S.user.id)) {
+      S.voiceStates[serverId][channelId].push({
+        id: S.user.id,
+        username: S.user.username,
+        displayName: S.user.displayName || S.user.username,
+        avatar: S.user.avatar,
+        color: S.user.color,
+        muted: false,
+        deafened: false,
+        screenSharing: false
+      });
+    }
+
     startVoiceTimer();
-    startRelaySender();
     updateVoiceButtons();
     updateVoiceBar(serverId, channelId);
+
+    // Navega diretamente para a aba da call
+    if ($('chatView')) $('chatView').style.display = 'none';
+    if ($('voiceRoomView')) $('voiceRoomView').style.display = 'flex';
+    S.view = serverId;
+    S.channelId = channelId;
+
+    renderSidebar();
+    renderHeader();
     renderVoiceRoom();
+
     send({ t: 'voiceJoin', serverId, channelId });
   } catch (e) {
     openMicHelpModal();
@@ -2370,13 +2424,46 @@ function leaveVoice() {
   for (const k of Object.keys(peerVideoStreams)) delete peerVideoStreams[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
-  if (S.voice) { send({ t: 'voiceLeave' }); S.voice = null; }
+
+  const prevVoice = S.voice;
+  if (S.voice) {
+    // Remove usuário otimisticamente do estado de voz
+    if (S.voiceStates[S.voice.serverId] && S.voiceStates[S.voice.serverId][S.voice.channelId]) {
+      S.voiceStates[S.voice.serverId][S.voice.channelId] = S.voiceStates[S.voice.serverId][S.voice.channelId].filter(u => u.id !== S.user?.id);
+    }
+    send({ t: 'voiceLeave' });
+    S.voice = null;
+  }
+
   S.muted = false;
   S.deafened = false;
   S.screenSharing = false;
   updateVoiceButtons();
   updateVoiceBar(null);
-  renderVoiceRoom();
+
+  // Sai direto da tela da call e retorna ao chat de texto
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+  if ($('chatView')) $('chatView').style.display = 'flex';
+
+  if (prevVoice && prevVoice.serverId !== 'dm') {
+    const srv = S.servers.find(s => s.id === prevVoice.serverId);
+    const firstText = srv ? srv.channels.find(c => c.type === 'text') : null;
+    if (firstText) {
+      openChannel(firstText.id);
+    } else {
+      renderSidebar();
+      renderHeader();
+      renderMessages();
+    }
+  } else if (prevVoice && prevVoice.serverId === 'dm') {
+    if (S.dmId) renderDmMessages();
+    else renderHomeMain();
+    renderSidebar();
+    renderHeader();
+  } else {
+    renderSidebar();
+    renderHeader();
+  }
 }
 
 function toggleMute() {
