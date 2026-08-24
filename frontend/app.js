@@ -1166,7 +1166,15 @@ function renderAttachmentHtml(att) {
   } else if (att.type === 'audio') {
     return `<div class="msg-attachment"><audio class="msg-audio-attachment" controls preload="metadata" src="${esc(att.url)}"></audio></div>`;
   }
-  return `<div class="msg-attachment"><a href="${esc(att.url)}" download="${esc(att.name || 'arquivo')}" class="btn btn-small btn-ghost" target="_blank">📁 ${esc(att.name || 'Baixar Arquivo')}</a></div>`;
+  const sizeKb = att.size ? ` (${(att.size / 1024).toFixed(1)} KB)` : '';
+  return `<div class="msg-attachment" style="background:#2b2d31;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:inline-flex;align-items:center;gap:12px;max-width:380px;margin-top:6px">
+    <span style="font-size:24px">📄</span>
+    <div style="overflow:hidden;flex:1">
+      <div style="font-size:13.5px;font-weight:700;color:var(--header,#f2f3f5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(att.name || 'Arquivo')}</div>
+      <div style="font-size:11.5px;color:var(--text-dim,#949ba4)">${sizeKb || 'Arquivo para download'}</div>
+    </div>
+    <a href="${esc(att.url)}" download="${esc(att.name || 'arquivo')}" target="_blank" class="btn btn-small btn-primary" style="padding:6px 12px;font-size:12px;white-space:nowrap">⬇️ Baixar</a>
+  </div>`;
 }
 
 function renderInlineMediaFromText(text, hasAttachment) {
@@ -1710,10 +1718,37 @@ function clearComposerAttachment() {
   if (fi) fi.value = '';
 }
 
-function processMediaFile(file) {
+async function uploadFileToBackend(file) {
+  const backend = getBackendUrl();
+  if (backend && backend.startsWith('http')) {
+    try {
+      const resp = await fetch(`${backend}/api/upload`, {
+        method: 'POST',
+        headers: {
+          'X-Filename': encodeURIComponent(file.name || 'arquivo')
+        },
+        body: file
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.url) {
+          const fullUrl = data.url.startsWith('http') ? data.url : `${backend}${data.url}`;
+          return {
+            url: fullUrl,
+            name: data.name || file.name,
+            size: data.size || file.size
+          };
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+async function processMediaFile(file) {
   if (!file) return;
-  if (file.size > 20 * 1024 * 1024) {
-    toast('⚠ Arquivo muito grande (máximo 20MB).');
+  if (file.size > 50 * 1024 * 1024) {
+    toast('⚠ Arquivo muito grande (máximo 50MB).');
     return;
   }
 
@@ -1722,10 +1757,25 @@ function processMediaFile(file) {
   else if (file.type.startsWith('video/')) type = 'video';
   else if (file.type.startsWith('audio/')) type = 'audio';
 
+  toast('⏳ Processando arquivo...');
+
+  const serverResult = await uploadFileToBackend(file);
+  if (serverResult && serverResult.url) {
+    setComposerAttachment({
+      type,
+      url: serverResult.url,
+      name: serverResult.name || file.name,
+      size: serverResult.size || file.size
+    });
+    toast('✓ Arquivo pronto para enviar!');
+    return;
+  }
+
+  // Fallback: DataURL Base64
   const reader = new FileReader();
   reader.onload = e => {
     const dataUrl = e.target.result;
-    if (type === 'image' && file.size > 1.5 * 1024 * 1024) {
+    if (type === 'image' && file.size > 1.2 * 1024 * 1024) {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
@@ -1746,6 +1796,7 @@ function processMediaFile(file) {
           name: file.name,
           size: Math.round(compressedUrl.length * 0.75)
         });
+        toast('✓ Imagem pronta!');
       };
       img.src = dataUrl;
     } else {
@@ -1755,6 +1806,7 @@ function processMediaFile(file) {
         name: file.name,
         size: file.size
       });
+      toast('✓ Arquivo pronto!');
     }
   };
   reader.readAsDataURL(file);
@@ -1864,7 +1916,7 @@ function stopVoiceRecording(sendIt = true) {
     return;
   }
 
-  voiceMediaRec.onstop = () => {
+  voiceMediaRec.onstop = async () => {
     if (voiceRecStream) {
       voiceRecStream.getTracks().forEach(t => t.stop());
       voiceRecStream = null;
@@ -1874,18 +1926,33 @@ function stopVoiceRecording(sendIt = true) {
 
     const mime = voiceMediaRec.mimeType || 'audio/webm';
     const blob = new Blob(voiceRecChunks, { type: mime });
-    const reader = new FileReader();
-    reader.onload = e => {
-      const dataUrl = e.target.result;
+    const audioFile = new File([blob], `audio_${Date.now()}.webm`, { type: mime });
+
+    toast('⏳ Enviando áudio...');
+    const uploaded = await uploadFileToBackend(audioFile);
+    if (uploaded && uploaded.url) {
       sendCurrentWithAttachment({
         type: 'audio',
-        url: dataUrl,
-        name: `audio_${Date.now()}.webm`,
+        url: uploaded.url,
+        name: uploaded.name,
         duration: voiceRecSeconds,
-        size: blob.size
+        size: uploaded.size
       });
-    };
-    reader.readAsDataURL(blob);
+      toast('✓ Áudio enviado!');
+    } else {
+      const reader = new FileReader();
+      reader.onload = e => {
+        sendCurrentWithAttachment({
+          type: 'audio',
+          url: e.target.result,
+          name: audioFile.name,
+          duration: voiceRecSeconds,
+          size: blob.size
+        });
+        toast('✓ Áudio enviado!');
+      };
+      reader.readAsDataURL(blob);
+    }
   };
 
   try {

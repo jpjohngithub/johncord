@@ -154,10 +154,114 @@ function makeFriends(a, b) {
   sendTo(b.id, { t: 'friends', friends: b.friends.map(getUserPublic).filter(Boolean), info: `${a.username} agora é seu amigo!` });
 }
 
-// ---------- WebSocket ----------
-const wss = new WebSocketServer({ server: http.createServer((req, res) => {
-  // Servir arquivos estáticos
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const httpServer = http.createServer((req, res) => {
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, X-Filename');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   let p = req.url.split('?')[0];
+
+  // Rota de Upload de Arquivos / Mídia
+  if (req.method === 'POST' && p === '/api/upload') {
+    const filenameHeader = req.headers['x-filename'] || 'arquivo_' + Date.now();
+    let cleanFilename = 'arquivo';
+    try {
+      cleanFilename = decodeURIComponent(filenameHeader).replace(/[^a-zA-Z0-9._-]/g, '_');
+    } catch (e) {
+      cleanFilename = String(filenameHeader).replace(/[^a-zA-Z0-9._-]/g, '_');
+    }
+    const targetFilename = `${Date.now()}_${cleanFilename}`;
+    const targetPath = path.join(UPLOADS_DIR, targetFilename);
+
+    const writeStream = fs.createWriteStream(targetPath);
+    req.pipe(writeStream);
+
+    writeStream.on('finish', () => {
+      const stats = fs.statSync(targetPath);
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({
+        url: `/uploads/${targetFilename}`,
+        name: cleanFilename,
+        size: stats.size
+      }));
+    });
+
+    writeStream.on('error', (err) => {
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'Erro ao salvar arquivo' }));
+    });
+    return;
+  }
+
+  // Rota para servir uploads com suporte a Range (streaming de vídeo e áudio)
+  if (p.startsWith('/uploads/')) {
+    const safePath = path.join(UPLOADS_DIR, path.basename(p));
+    if (!fs.existsSync(safePath)) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    const stat = fs.statSync(safePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+    const ext = path.extname(safePath).toLowerCase();
+    const contentTypes = {
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.pdf': 'application/pdf',
+      '.zip': 'application/zip',
+      '.txt': 'text/plain'
+    };
+    const contentType = contentTypes[ext] || 'application/octet-stream';
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      const fileStream = fs.createReadStream(safePath, { start, end });
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*'
+      });
+      fileStream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*'
+      });
+      fs.createReadStream(safePath).pipe(res);
+    }
+    return;
+  }
+
+  // Servir arquivos estáticos
   if (p === '/') p = '/index.html';
   const file = path.join(FRONTEND_DIR, path.normalize(p).replace(/^([/\\])+/, ''));
   if (!file.startsWith(FRONTEND_DIR)) { res.writeHead(403); res.end(); return; }
@@ -171,7 +275,13 @@ const wss = new WebSocketServer({ server: http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(PORT, () => console.log(`JohnCord rodando em http://localhost:${PORT}`)) });
+});
+
+// ---------- WebSocket ----------
+const wss = new WebSocketServer({
+  server: httpServer.listen(PORT, () => console.log(`JohnCord rodando em http://localhost:${PORT}`)),
+  maxPayload: 100 * 1024 * 1024
+});
 
 wss.on('connection', (ws) => {
   let me = null;
@@ -262,8 +372,8 @@ wss.on('connection', (ws) => {
       const content = String(d.content || '').slice(0, 4000).trim();
       const attachment = d.attachment && typeof d.attachment === 'object' && d.attachment.url ? {
         type: ['image', 'video', 'audio', 'file'].includes(d.attachment.type) ? d.attachment.type : 'file',
-        url: String(d.attachment.url).slice(0, 10000000),
-        name: d.attachment.name ? String(d.attachment.name).slice(0, 100) : 'anexo',
+        url: String(d.attachment.url),
+        name: d.attachment.name ? String(d.attachment.name).slice(0, 150) : 'anexo',
         size: typeof d.attachment.size === 'number' ? d.attachment.size : 0,
         duration: typeof d.attachment.duration === 'number' ? d.attachment.duration : 0
       } : null;
@@ -293,8 +403,8 @@ wss.on('connection', (ws) => {
       const content = String(d.content || '').slice(0, 4000).trim();
       const attachment = d.attachment && typeof d.attachment === 'object' && d.attachment.url ? {
         type: ['image', 'video', 'audio', 'file'].includes(d.attachment.type) ? d.attachment.type : 'file',
-        url: String(d.attachment.url).slice(0, 10000000),
-        name: d.attachment.name ? String(d.attachment.name).slice(0, 100) : 'anexo',
+        url: String(d.attachment.url),
+        name: d.attachment.name ? String(d.attachment.name).slice(0, 150) : 'anexo',
         size: typeof d.attachment.size === 'number' ? d.attachment.size : 0,
         duration: typeof d.attachment.duration === 'number' ? d.attachment.duration : 0
       } : null;
