@@ -1951,6 +1951,7 @@ let localStream = null;
 let screenStream = null;
 const peers = {};               // userId -> RTCPeerConnection
 const peerAudioStreams = {};    // userId -> MediaStream com todas as faixas de audio recebidas
+const peerVideoStreams = {};    // userId -> MediaStream (video da tela remota)
 const pendingCandidates = {};   // userId -> Array of RTCIceCandidateInit
 let voiceStartTime = null;
 let voiceTimerInterval = null;
@@ -2256,6 +2257,8 @@ function leaveVoice() {
   for (const k of Object.keys(peers)) delete peers[k];
   for (const k of Object.keys(pendingCandidates)) delete pendingCandidates[k];
   for (const k of Object.keys(connStatus)) delete connStatus[k];
+  for (const k of Object.keys(peerAudioStreams)) delete peerAudioStreams[k];
+  for (const k of Object.keys(peerVideoStreams)) delete peerVideoStreams[k];
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
   if (S.voice) { send({ t: 'voiceLeave' }); S.voice = null; }
@@ -2508,12 +2511,9 @@ function renderVoiceRoom() {
   if (S.spotlightUser) {
     if (S.spotlightUser === S.user?.id && S.screenSharing && screenStream) {
       spotlightTarget = { isMe: true, user: S.user, stream: screenStream };
-    } else {
-      const u = otherUsers.find(x => x.id === S.spotlightUser && x.screenSharing);
-      const vid = document.getElementById('video-' + S.spotlightUser);
-      if (u && vid && vid.srcObject) {
-        spotlightTarget = { isMe: false, user: u, stream: vid.srcObject };
-      }
+    } else if (peerVideoStreams[S.spotlightUser]) {
+      const u = otherUsers.find(x => x.id === S.spotlightUser) || { id: S.spotlightUser, username: 'Usuário' };
+      spotlightTarget = { isMe: false, user: u, stream: peerVideoStreams[S.spotlightUser] };
     }
   }
 
@@ -2529,7 +2529,7 @@ function renderVoiceRoom() {
     const v = document.createElement('video');
     v.autoplay = true;
     v.playsInline = true;
-    v.muted = spotlightTarget.isMe;
+    v.muted = true;
     v.srcObject = spotlightTarget.stream;
     v.title = "Clique duplo para Tela Cheia";
     v.ondblclick = () => toggleFullscreen(v);
@@ -2589,7 +2589,7 @@ function renderVoiceRoom() {
       const uStrip = document.createElement('div');
       uStrip.className = 'vr-strip-tile' + (S.spotlightUser === u.id ? ' active' : '');
       uStrip.dataset.uid = u.id;
-      const hasScreen = u.screenSharing;
+      const hasScreen = u.screenSharing || !!peerVideoStreams[u.id];
       const uStripAv = document.createElement('div');
       uStripAv.className = 'user-avatar';
       setAvatar(uStripAv, u);
@@ -2618,7 +2618,7 @@ function renderVoiceRoom() {
   }
 
   // MODO GRADE (MOSAICO)
-  const hasAnyScreen = S.screenSharing || otherUsers.some(u => u.screenSharing);
+  const hasAnyScreen = S.screenSharing || otherUsers.some(u => u.screenSharing || !!peerVideoStreams[u.id]);
   const grid = document.createElement('div');
   grid.className = 'vr-grid' + (hasAnyScreen ? ' has-screen' : '');
 
@@ -2697,16 +2697,18 @@ function renderVoiceRoom() {
 
   // Cards dos Outros Usuários na Call
   otherUsers.forEach(u => {
+    const hasVideo = !!peerVideoStreams[u.id];
+    const isScreen = u.screenSharing || hasVideo;
     const tile = document.createElement('div');
-    tile.className = 'vr-tile' + (u.screenSharing ? ' is-screen' : '');
+    tile.className = 'vr-tile' + (isScreen ? ' is-screen' : '');
     tile.dataset.uid = u.id;
-    const remoteVid = document.getElementById('video-' + u.id);
 
-    if (u.screenSharing && remoteVid && remoteVid.srcObject) {
+    if (hasVideo) {
       const v = document.createElement('video');
       v.autoplay = true;
       v.playsInline = true;
-      v.srcObject = remoteVid.srcObject;
+      v.muted = true;
+      v.srcObject = peerVideoStreams[u.id];
       v.title = "Clique duplo para Tela Cheia";
       v.ondblclick = () => toggleFullscreen(v);
       tile.appendChild(v);
@@ -2752,15 +2754,15 @@ function renderVoiceRoom() {
     overlay.className = 'vr-tile-overlay';
     overlay.innerHTML = `
       <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="openUserProfileModal('${u.id}')">
-        ${u.screenSharing ? `<span class="badge-live-pulse">🔴 AO VIVO</span>` : ''}
+        ${isScreen ? `<span class="badge-live-pulse">🔴 AO VIVO</span>` : ''}
         <span>${esc(u.displayName || u.username)}</span>
         <span data-conn-uid="${u.id}" style="font-size:11px"></span>
       </div>
       <div class="vr-actions">
         <span>${u.deafened ? '🎧🔇' : (u.muted ? '🔇' : '🎙️')}</span>
         <button class="vr-action-btn vr-vol-btn" title="Ajustar Volume">🔊 ${getUserVolume(u.id)}%</button>
-        ${u.screenSharing ? `<button class="vr-action-btn vr-spot-btn" title="Assistir e Focar na Transmissão">👁️ Assistir</button>` : ''}
-        ${u.screenSharing ? `<button class="vr-action-btn vr-fs-btn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
+        ${isScreen ? `<button class="vr-action-btn vr-spot-btn" title="Assistir e Focar na Transmissão">👁️ Assistir</button>` : ''}
+        ${hasVideo ? `<button class="vr-action-btn vr-fs-btn" title="Tela Cheia">⛶ Tela Cheia</button>` : ''}
       </div>
     `;
 
@@ -2856,6 +2858,9 @@ function getPeer(peerId, initiator) {
   if (localStream) {
     localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
   }
+  if (screenStream) {
+    screenStream.getVideoTracks().forEach(t => pc.addTrack(t, screenStream));
+  }
 
   pc.onicecandidate = e => {
     if (e.candidate) {
@@ -2865,29 +2870,18 @@ function getPeer(peerId, initiator) {
 
   pc.ontrack = e => {
     unlockAudioContext();
-    const stream = e.streams[0] || new MediaStream([e.track]);
     if (e.track.kind === 'video') {
-      let video = document.getElementById('video-' + peerId);
-      if (!video) {
-        video = document.createElement('video');
-        video.id = 'video-' + peerId;
-        video.autoplay = true;
-        video.playsInline = true;
-        video.className = 'remote-video';
-        video.style.display = 'none';
-        document.body.appendChild(video);
-      }
-      video.srcObject = stream;
-      video.play().catch(() => {});
+      console.log('[WebRTC Video] Recebeu faixa de video de', peerId);
+      const stream = e.streams[0] || new MediaStream([e.track]);
+      peerVideoStreams[peerId] = stream;
       e.track.onended = () => {
-        video.srcObject = null;
+        delete peerVideoStreams[peerId];
         if (S.spotlightUser === peerId) S.spotlightUser = null;
         renderVoiceRoom();
       };
       renderVoiceRoom();
     } else {
       // Acumula faixas de audio do peer (voz + possiveis novas fontes)
-      // sem sobrescrever o que ja estava tocando
       if (!peerAudioStreams[peerId]) peerAudioStreams[peerId] = new MediaStream();
       if (!peerAudioStreams[peerId].getTracks().includes(e.track)) {
         peerAudioStreams[peerId].addTrack(e.track);
@@ -2938,6 +2932,7 @@ function recreatePeer(peerId, initiator) {
   }
   delete pendingCandidates[peerId];
   delete peerAudioStreams[peerId];
+  delete peerVideoStreams[peerId];
   if (S.voice) {
     connStatus[peerId] = initiator ? 'retrying' : 'connecting';
     renderConnBadges();
@@ -2986,6 +2981,7 @@ function syncVoicePeers() {
       delete pendingCandidates[pid];
       delete connStatus[pid];
       delete peerAudioStreams[pid];
+      delete peerVideoStreams[pid];
       const a = document.getElementById('audio-' + pid);
       if (a) a.remove();
       const v = document.getElementById('video-' + pid);
@@ -3046,6 +3042,12 @@ async function handleSignal(from, data) {
         const senders = pc.getSenders().map(s => s.track);
         localStream.getTracks().forEach(t => {
           if (!senders.includes(t)) pc.addTrack(t, localStream);
+        });
+      }
+      if (screenStream) {
+        const senders = pc.getSenders().map(s => s.track);
+        screenStream.getVideoTracks().forEach(t => {
+          if (!senders.includes(t)) pc.addTrack(t, screenStream);
         });
       }
       if (offerCollision) {
