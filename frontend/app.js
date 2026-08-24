@@ -1157,6 +1157,48 @@ function fmtTime(ts) {
   return `Hoje às ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 }
 
+function renderAttachmentHtml(att) {
+  if (!att || !att.url) return '';
+  if (att.type === 'image') {
+    return `<div class="msg-attachment"><img class="msg-img-attachment" src="${esc(att.url)}" alt="Imagem" onclick="openMediaLightbox('${esc(att.url)}')"></div>`;
+  } else if (att.type === 'video') {
+    return `<div class="msg-attachment"><video class="msg-video-attachment" controls playsinline preload="metadata" src="${esc(att.url)}"></video></div>`;
+  } else if (att.type === 'audio') {
+    return `<div class="msg-attachment"><audio class="msg-audio-attachment" controls preload="metadata" src="${esc(att.url)}"></audio></div>`;
+  }
+  return `<div class="msg-attachment"><a href="${esc(att.url)}" download="${esc(att.name || 'arquivo')}" class="btn btn-small btn-ghost" target="_blank">📁 ${esc(att.name || 'Baixar Arquivo')}</a></div>`;
+}
+
+function renderInlineMediaFromText(text, hasAttachment) {
+  if (hasAttachment || !text) return '';
+  let extraHtml = '';
+  const imgMatch = text.match(/https?:\/\/[^\s]+\.(png|jpg|jpeg|gif|webp)(\?[^\s]*)?/i);
+  if (imgMatch) {
+    extraHtml += `<div class="msg-attachment"><img class="msg-img-attachment" src="${esc(imgMatch[0])}" alt="Imagem" onclick="openMediaLightbox('${esc(imgMatch[0])}')"></div>`;
+  }
+  const videoMatch = text.match(/https?:\/\/[^\s]+\.(mp4|webm|mov)(\?[^\s]*)?/i);
+  if (videoMatch && !imgMatch) {
+    extraHtml += `<div class="msg-attachment"><video class="msg-video-attachment" controls playsinline preload="metadata" src="${esc(videoMatch[0])}"></video></div>`;
+  }
+  const audioMatch = text.match(/https?:\/\/[^\s]+\.(mp3|wav|ogg|m4a)(\?[^\s]*)?/i);
+  if (audioMatch && !imgMatch && !videoMatch) {
+    extraHtml += `<div class="msg-attachment"><audio class="msg-audio-attachment" controls preload="metadata" src="${esc(audioMatch[0])}"></audio></div>`;
+  }
+  return extraHtml;
+}
+
+function openMediaLightbox(url) {
+  openModal(`
+    <div style="text-align:center;max-width:90vw;max-height:85vh;display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <img src="${esc(url)}" alt="Imagem Ampliada" style="max-width:100%;max-height:75vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 30px rgba(0,0,0,0.8)">
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <a href="${esc(url)}" target="_blank" download="imagem" class="btn btn-primary">⬇️ Baixar Imagem</a>
+        <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+      </div>
+    </div>
+  `);
+}
+
 let msgTarget = null; // alvo de renderizacao em lote (fragment)
 
 function appendMsg(m, opts = {}) {
@@ -1189,6 +1231,8 @@ function appendMsg(m, opts = {}) {
     }
   }
 
+  const attHtml = renderAttachmentHtml(m.attachment) || renderInlineMediaFromText(m.content, !!m.attachment);
+
   if (!grouped) {
     const g = document.createElement('div');
     g.className = 'msg-group';
@@ -1206,17 +1250,25 @@ function appendMsg(m, opts = {}) {
         <span class="msg-author" style="color:${authorColor};cursor:pointer" title="Ver perfil">${esc(disp)}</span>${tagHtml}${roleBadge}
         <span class="msg-time">${fmtTime(m.ts)}</span>
       </div>
-      <div class="msg-text">${mdLite(m.content)}</div>`;
+      ${m.content ? `<div class="msg-text">${mdLite(m.content)}</div>` : ''}
+      ${attHtml}`;
     content.querySelector('.msg-author').onclick = () => openUserProfileModal(m.userId);
     g.appendChild(av); g.appendChild(content);
     box.appendChild(g);
   } else {
     const last = box.querySelector('.msg-group:last-child .msg-content');
     if (last) {
-      const t = document.createElement('div');
-      t.className = 'msg-text';
-      t.innerHTML = mdLite(m.content);
-      last.appendChild(t);
+      if (m.content) {
+        const t = document.createElement('div');
+        t.className = 'msg-text';
+        t.innerHTML = mdLite(m.content);
+        last.appendChild(t);
+      }
+      if (attHtml) {
+        const attDiv = document.createElement('div');
+        attDiv.innerHTML = attHtml;
+        last.appendChild(attDiv.firstElementChild || attDiv);
+      }
     }
   }
   if (!opts.noScroll && nearBottom) queueScroll();
@@ -1609,19 +1661,257 @@ function renderSearchResults(results) {
   });
 }
 
-/* ---------- Envio ---------- */
-$('btnSend').onclick = sendCurrent;
-$('msgInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrent(); }
-});
-$('msgInput').addEventListener('input', () => {
-  if (S.view !== 'home' && S.channelId) send({ t: 'typing', serverId: S.view, channelId: S.channelId });
+/* ---------- Gerenciamento de Anexos e Mídia (Fotos, Vídeos, Áudio) ---------- */
+let currentAttachment = null;
+
+function setComposerAttachment(att) {
+  currentAttachment = att;
+  const preview = $('composerAttachmentPreview');
+  if (!preview) return;
+  if (!att) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+    return;
+  }
+
+  let thumbHtml = '';
+  if (att.type === 'image') {
+    thumbHtml = `<img src="${esc(att.url)}" class="composer-preview-thumb" alt="Preview">`;
+  } else if (att.type === 'video') {
+    thumbHtml = `<div class="composer-preview-thumb">🎬</div>`;
+  } else if (att.type === 'audio') {
+    thumbHtml = `<div class="composer-preview-thumb">🎵</div>`;
+  } else {
+    thumbHtml = `<div class="composer-preview-thumb">📁</div>`;
+  }
+
+  const sizeKb = att.size ? ` (${(att.size / 1024).toFixed(1)} KB)` : '';
+  preview.innerHTML = `
+    ${thumbHtml}
+    <div style="flex:1;overflow:hidden">
+      <div style="font-size:13px;font-weight:700;color:var(--header);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(att.name || 'Arquivo')}</div>
+      <div style="font-size:11px;color:var(--text-dim)">${att.type.toUpperCase()}${sizeKb}</div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-small" id="btnRemoveAttachment" style="color:#f23f43;font-size:16px;padding:4px 8px" title="Remover anexo">✕</button>
+  `;
+  preview.style.display = 'flex';
+  const removeBtn = $('btnRemoveAttachment');
+  if (removeBtn) removeBtn.onclick = clearComposerAttachment;
+}
+
+function clearComposerAttachment() {
+  currentAttachment = null;
+  const preview = $('composerAttachmentPreview');
+  if (preview) {
+    preview.style.display = 'none';
+    preview.innerHTML = '';
+  }
+  const fi = $('composerFileInput');
+  if (fi) fi.value = '';
+}
+
+function processMediaFile(file) {
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    toast('⚠ Arquivo muito grande (máximo 20MB).');
+    return;
+  }
+
+  let type = 'file';
+  if (file.type.startsWith('image/')) type = 'image';
+  else if (file.type.startsWith('video/')) type = 'video';
+  else if (file.type.startsWith('audio/')) type = 'audio';
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    if (type === 'image' && file.size > 1.5 * 1024 * 1024) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        const maxD = 1600;
+        if (w > maxD || h > maxD) {
+          if (w > h) { h = Math.round(h * maxD / w); w = maxD; }
+          else { w = Math.round(w * maxD / h); h = maxD; }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressedUrl = canvas.toDataURL('image/jpeg', 0.82);
+        setComposerAttachment({
+          type: 'image',
+          url: compressedUrl,
+          name: file.name,
+          size: Math.round(compressedUrl.length * 0.75)
+        });
+      };
+      img.src = dataUrl;
+    } else {
+      setComposerAttachment({
+        type,
+        url: dataUrl,
+        name: file.name,
+        size: file.size
+      });
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// Botao de Anexo
+if ($('btnAttach')) {
+  $('btnAttach').onclick = () => $('composerFileInput')?.click();
+}
+if ($('composerFileInput')) {
+  $('composerFileInput').onchange = e => {
+    const file = e.target.files && e.target.files[0];
+    if (file) processMediaFile(file);
+  };
+}
+
+// Suporte a colar imagens (Ctrl + V)
+window.addEventListener('paste', e => {
+  if (e.clipboardData && e.clipboardData.items) {
+    for (const item of e.clipboardData.items) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          processMediaFile(file);
+          toast('📎 Arquivo colado da área de transferência!');
+          break;
+        }
+      }
+    }
+  }
 });
 
-function sendCurrent() {
+// Suporte a Arrastar e Soltar (Drag and Drop)
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    processMediaFile(e.dataTransfer.files[0]);
+    toast('📎 Arquivo anexado!');
+  }
+});
+
+/* ---------- Gravador de Mensagem de Voz (Voice Note) ---------- */
+let voiceMediaRec = null;
+let voiceRecChunks = [];
+let voiceRecTimer = null;
+let voiceRecSeconds = 0;
+let voiceRecStream = null;
+
+function formatRecTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+async function startVoiceRecording() {
+  unlockAudioContext();
+  try {
+    voiceRecStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceRecChunks = [];
+    voiceRecSeconds = 0;
+
+    let mimeType = 'audio/webm';
+    if (!MediaRecorder.isTypeSupported('audio/webm')) {
+      if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+      else if (MediaRecorder.isTypeSupported('audio/ogg')) mimeType = 'audio/ogg';
+      else mimeType = '';
+    }
+
+    voiceMediaRec = mimeType ? new MediaRecorder(voiceRecStream, { mimeType }) : new MediaRecorder(voiceRecStream);
+
+    voiceMediaRec.ondataavailable = e => {
+      if (e.data && e.data.size > 0) voiceRecChunks.push(e.data);
+    };
+
+    voiceMediaRec.start(100);
+
+    const recBar = $('voiceRecordingBar');
+    const composerBox = document.querySelector('.composer');
+    if (recBar) recBar.style.display = 'flex';
+    if (composerBox) composerBox.style.display = 'none';
+
+    $('recTimerText').textContent = '00:00';
+    clearInterval(voiceRecTimer);
+    voiceRecTimer = setInterval(() => {
+      voiceRecSeconds++;
+      $('recTimerText').textContent = formatRecTime(voiceRecSeconds);
+    }, 1000);
+
+  } catch (err) {
+    toast('⚠ Não foi possível acessar o microfone para gravar áudio.');
+  }
+}
+
+function stopVoiceRecording(sendIt = true) {
+  clearInterval(voiceRecTimer);
+  const recBar = $('voiceRecordingBar');
+  const composerBox = document.querySelector('.composer');
+  if (recBar) recBar.style.display = 'none';
+  if (composerBox) composerBox.style.display = 'flex';
+
+  if (!voiceMediaRec || voiceMediaRec.state === 'inactive') {
+    if (voiceRecStream) {
+      voiceRecStream.getTracks().forEach(t => t.stop());
+      voiceRecStream = null;
+    }
+    return;
+  }
+
+  voiceMediaRec.onstop = () => {
+    if (voiceRecStream) {
+      voiceRecStream.getTracks().forEach(t => t.stop());
+      voiceRecStream = null;
+    }
+
+    if (!sendIt || !voiceRecChunks.length) return;
+
+    const mime = voiceMediaRec.mimeType || 'audio/webm';
+    const blob = new Blob(voiceRecChunks, { type: mime });
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      sendCurrentWithAttachment({
+        type: 'audio',
+        url: dataUrl,
+        name: `audio_${Date.now()}.webm`,
+        duration: voiceRecSeconds,
+        size: blob.size
+      });
+    };
+    reader.readAsDataURL(blob);
+  };
+
+  try {
+    voiceMediaRec.stop();
+  } catch (e) {}
+}
+
+if ($('btnRecordVoice')) {
+  $('btnRecordVoice').onclick = () => {
+    if (voiceMediaRec && voiceMediaRec.state === 'recording') {
+      stopVoiceRecording(true);
+    } else {
+      startVoiceRecording();
+    }
+  };
+}
+if ($('btnRecCancel')) $('btnRecCancel').onclick = () => stopVoiceRecording(false);
+if ($('btnRecSend')) $('btnRecSend').onclick = () => stopVoiceRecording(true);
+
+function sendCurrentWithAttachment(overrideAttachment = null) {
   const val = $('msgInput').value.trim();
-  if (!val || !S.user) return;
+  const att = overrideAttachment || currentAttachment;
+  if (!val && !att) return;
+  if (!S.user) return;
   $('msgInput').value = '';
+  clearComposerAttachment();
 
   const localMsg = {
     id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
@@ -1631,6 +1921,7 @@ function sendCurrent() {
     avatar: S.user.avatar || null,
     color: S.user.color || '#5865f2',
     content: val,
+    attachment: att,
     ts: Date.now()
   };
 
@@ -1640,7 +1931,7 @@ function sendCurrent() {
     if (!S.dms[S.dmId]) S.dms[S.dmId] = { messages: [] };
     S.dms[S.dmId].messages.push(localMsg);
     appendMsg(localMsg);
-    send({ t: 'dm', userId: entry.user.id, content: val });
+    send({ t: 'dm', userId: entry.user.id, content: val, attachment: att });
   } else if (S.channelId) {
     const key = `${S.view}:${S.channelId}`;
     if (!S.channelCache[key]) S.channelCache[key] = [];
@@ -1648,9 +1939,22 @@ function sendCurrent() {
     const welcome = document.querySelector('.channel-welcome');
     if (welcome) welcome.remove();
     appendMsg(localMsg);
-    send({ t: 'msg', serverId: S.view, channelId: S.channelId, content: val });
+    send({ t: 'msg', serverId: S.view, channelId: S.channelId, content: val, attachment: att });
   }
 }
+
+function sendCurrent() {
+  sendCurrentWithAttachment(null);
+}
+
+/* ---------- Envio ---------- */
+$('btnSend').onclick = sendCurrent;
+$('msgInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrent(); }
+});
+$('msgInput').addEventListener('input', () => {
+  if (S.view !== 'home' && S.channelId) send({ t: 'typing', serverId: S.view, channelId: S.channelId });
+});
 
 /* ---------- Modais ---------- */
 function openModal(html) {

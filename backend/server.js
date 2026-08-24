@@ -259,8 +259,16 @@ wss.on('connection', (ws) => {
       const ch = srv.channels.find(c => c.id === d.channelId);
       if (!ch || ch.type !== 'text') return;
       if (!ch.messages) ch.messages = [];
-      const content = String(d.content || '').slice(0, 2000).trim();
-      if (!content) return;
+      const content = String(d.content || '').slice(0, 4000).trim();
+      const attachment = d.attachment && typeof d.attachment === 'object' && d.attachment.url ? {
+        type: ['image', 'video', 'audio', 'file'].includes(d.attachment.type) ? d.attachment.type : 'file',
+        url: String(d.attachment.url).slice(0, 10000000),
+        name: d.attachment.name ? String(d.attachment.name).slice(0, 100) : 'anexo',
+        size: typeof d.attachment.size === 'number' ? d.attachment.size : 0,
+        duration: typeof d.attachment.duration === 'number' ? d.attachment.duration : 0
+      } : null;
+
+      if (!content && !attachment) return;
       const msg = {
         id: uid(),
         userId: me.id,
@@ -269,6 +277,7 @@ wss.on('connection', (ws) => {
         avatar: me.avatar || null,
         color: me.color,
         content,
+        attachment,
         ts: Date.now()
       };
       ch.messages.push(msg);
@@ -281,8 +290,16 @@ wss.on('connection', (ws) => {
       const target = db.users[d.userId];
       if (!target) return;
       const dm = getDm(me.id, target.id);
-      const content = String(d.content || '').slice(0, 2000).trim();
-      if (!content) return;
+      const content = String(d.content || '').slice(0, 4000).trim();
+      const attachment = d.attachment && typeof d.attachment === 'object' && d.attachment.url ? {
+        type: ['image', 'video', 'audio', 'file'].includes(d.attachment.type) ? d.attachment.type : 'file',
+        url: String(d.attachment.url).slice(0, 10000000),
+        name: d.attachment.name ? String(d.attachment.name).slice(0, 100) : 'anexo',
+        size: typeof d.attachment.size === 'number' ? d.attachment.size : 0,
+        duration: typeof d.attachment.duration === 'number' ? d.attachment.duration : 0
+      } : null;
+
+      if (!content && !attachment) return;
       const msg = {
         id: uid(),
         userId: me.id,
@@ -291,6 +308,7 @@ wss.on('connection', (ws) => {
         avatar: me.avatar || null,
         color: me.color,
         content,
+        attachment,
         ts: Date.now()
       };
       dm.messages.push(msg);
