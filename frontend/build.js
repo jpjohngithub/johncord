@@ -8,8 +8,10 @@ const dist = path.join(root, 'dist');
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
 
-['index.html', 'style.css', 'app.js', 'config.js'].forEach(f => {
-  fs.copyFileSync(path.join(root, f), path.join(dist, f));
+['index.html', 'style.css', 'app.js', 'config.js', 'logo.jpg', 'favicon.png'].forEach(f => {
+  if (fs.existsSync(path.join(root, f))) {
+    fs.copyFileSync(path.join(root, f), path.join(dist, f));
+  }
 });
 
 console.log('Build OK -> frontend/dist');

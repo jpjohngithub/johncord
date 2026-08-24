@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>JohnCord</title>
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<link rel="icon" type="image/jpeg" href="logo.jpg">
+<link rel="shortcut icon" href="favicon.png">
+<link rel="apple-touch-icon" href="logo.jpg">
 </head>
 <body>
 
 <!-- TELA DE LOGIN -->
 <div id="authScreen" class="auth-screen">
   <div class="auth-box">
-    <div class="auth-logo">🎮 JohnCord</div>
+    <div class="auth-logo"><img src="logo.jpg" alt="Logo" style="width:48px;height:48px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4)"> JohnCord</div>
     <div class="auth-sub">Converse e faça call com seus amigos</div>
     <div id="authError" class="auth-error" style="display:none"></div>
     <div class="auth-server-badge" id="authServerBadge">
@@ -35,7 +37,7 @@
   <!-- BARRA DE SERVIDORES -->
   <nav class="rail">
     <div class="rail-home" id="btnHome" title="Amigos / Mensagens diretas">
-      <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M20.3 4.4A16.9 16.9 0 0 0 16 3l-.2.4c1.5.4 2.8 1 4 1.8A13.7 13.7 0 0 0 12 3.6c-2.7 0-5.3.6-7.8 1.7 1.2-.8 2.6-1.5 4-1.9L8 3a17 17 0 0 0-4.3 1.3C1.6 8.5 1 12.5 1.3 16.4A17 17 0 0 0 6.5 19l1.1-1.6c-.8-.3-1.6-.7-2.3-1.2l.6-.4a12 12 0 0 0 10.2 0l.6.4c-.7.5-1.5.9-2.3 1.2L15.5 19a17 17 0 0 0 5.2-2.6c.4-4.5-.7-8.5-3.4-12ZM8.7 14.2c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Z"/></svg>
+      <img src="logo.jpg" alt="Home" style="width:30px;height:30px;border-radius:50%;object-fit:cover">
     </div>
     <div class="rail-sep"></div>
     <div id="serverList" class="rail-servers"></div>
