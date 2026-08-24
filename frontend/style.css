@@ -1547,108 +1547,14 @@ input, textarea, select {
 
 .vr-grid {
   width: 100%;
-  height: 100%;
-  min-height: 260px;
-  max-width: 1200px;
-  display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  grid-auto-rows: minmax(260px, 1fr);
+  max-width: 1100px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+  gap: 24px;
   box-sizing: border-box;
-}
-
-.vr-grid.has-screen {
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
-}
-
-/* Modo Spotlight */
-.vr-spotlight-layout {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.vr-spotlight-main {
-  flex: 1;
-  min-height: 0;
-  background: #000;
-  border-radius: var(--radius-xl);
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-lg);
-  border: 1.5px solid rgba(242, 63, 67, 0.4);
-}
-
-.vr-spotlight-main video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-
-.vr-spotlight-strip {
-  height: 100px;
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding: 4px 2px;
-  align-items: center;
-}
-
-.vr-strip-tile {
-  width: 140px;
-  min-width: 140px;
-  height: 90px;
-  background: var(--bg-card);
-  border-radius: var(--radius-lg);
-  border: 1.5px solid var(--border-subtle);
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all var(--ease-smooth);
-}
-
-.vr-strip-tile:hover {
-  border-color: var(--border-light);
-  transform: translateY(-2px);
-}
-
-.vr-strip-tile.active {
-  border-color: var(--blurple);
-  box-shadow: 0 4px 16px var(--blurple-glow);
-}
-
-.vr-strip-tile.speaking {
-  border-color: var(--green) !important;
-  box-shadow: 0 0 16px var(--green-glow);
-}
-
-.vr-strip-tile .user-avatar {
-  width: 40px;
-  height: 40px;
-  font-size: 18px;
-}
-
-.vr-strip-tile .vr-strip-name {
-  font-size: 11.5px;
-  font-weight: 700;
-  color: var(--header);
-  margin-top: 4px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: auto;
 }
 
 .vr-tile {
@@ -1660,10 +1566,12 @@ input, textarea, select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 260px;
-  height: 100%;
-  width: 100%;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 280px;
+  max-width: 440px;
+  min-height: 280px;
+  height: 320px;
+  flex: 1 1 320px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   border: 2px solid rgba(255, 255, 255, 0.08);
   transition: all var(--ease-smooth);
   box-sizing: border-box;

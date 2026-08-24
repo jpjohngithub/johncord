@@ -2956,6 +2956,43 @@ function updateVoiceTimerDisplay() {
 
 async function joinVoice(serverId, channelId) {
   unlockAudioContext();
+  S.voice = { serverId, channelId };
+  S.muted = false;
+  S.deafened = false;
+  S.screenSharing = false;
+
+  // Atualização otimista de participantes na sidebar
+  if (!S.voiceStates[serverId]) S.voiceStates[serverId] = {};
+  if (!S.voiceStates[serverId][channelId]) S.voiceStates[serverId][channelId] = [];
+  if (S.user && !S.voiceStates[serverId][channelId].some(u => u.id === S.user.id)) {
+    S.voiceStates[serverId][channelId].push({
+      id: S.user.id,
+      username: S.user.username,
+      displayName: S.user.displayName || S.user.username,
+      avatar: S.user.avatar,
+      color: S.user.color,
+      muted: false,
+      deafened: false,
+      screenSharing: false
+    });
+  }
+
+  startVoiceTimer();
+  updateVoiceButtons();
+  updateVoiceBar(serverId, channelId);
+
+  // Navega diretamente para a aba da call
+  if ($('chatView')) $('chatView').style.display = 'none';
+  if ($('voiceRoomView')) $('voiceRoomView').style.display = 'flex';
+  S.view = serverId;
+  S.channelId = channelId;
+
+  renderSidebar();
+  renderHeader();
+  renderVoiceRoom();
+
+  send({ t: 'voiceJoin', serverId, channelId });
+
   try {
     if (!localStream) {
       localStream = await navigator.mediaDevices.getUserMedia({
@@ -2969,44 +3006,8 @@ async function joinVoice(serverId, channelId) {
     }
     localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
     setupLocalVAD(localStream);
-    S.voice = { serverId, channelId };
-    S.muted = false;
-    S.deafened = false;
-    S.screenSharing = false;
-
-    // Atualização otimista de participantes na sidebar
-    if (!S.voiceStates[serverId]) S.voiceStates[serverId] = {};
-    if (!S.voiceStates[serverId][channelId]) S.voiceStates[serverId][channelId] = [];
-    if (S.user && !S.voiceStates[serverId][channelId].some(u => u.id === S.user.id)) {
-      S.voiceStates[serverId][channelId].push({
-        id: S.user.id,
-        username: S.user.username,
-        displayName: S.user.displayName || S.user.username,
-        avatar: S.user.avatar,
-        color: S.user.color,
-        muted: false,
-        deafened: false,
-        screenSharing: false
-      });
-    }
-
-    startVoiceTimer();
-    updateVoiceButtons();
-    updateVoiceBar(serverId, channelId);
-
-    // Navega diretamente para a aba da call
-    if ($('chatView')) $('chatView').style.display = 'none';
-    if ($('voiceRoomView')) $('voiceRoomView').style.display = 'flex';
-    S.view = serverId;
-    S.channelId = channelId;
-
-    renderSidebar();
-    renderHeader();
-    renderVoiceRoom();
-
-    send({ t: 'voiceJoin', serverId, channelId });
   } catch (e) {
-    openMicHelpModal();
+    console.warn('Microfone indisponível ou permissão pendente:', e);
   }
 }
 
@@ -3307,19 +3308,11 @@ if ($('vrBtnLeave')) $('vrBtnLeave').onclick = leaveVoice;
 function renderVoiceRoom() {
   const stage = $('voiceRoomStage');
   if (!stage) return;
-  
-  const currentCh = currentServer()?.channels?.find(c => c.id === S.channelId);
-  const isVoiceTab = currentCh && currentCh.type === 'voice';
-
-  if (!isVoiceTab && !S.voice) {
-    stage.innerHTML = '';
-    return;
-  }
 
   const srvId = S.voice ? S.voice.serverId : S.view;
   const chId = S.voice ? S.voice.channelId : S.channelId;
   const srv = S.servers.find(s => s.id === srvId);
-  const ch = srv && srv.channels.find(c => c.id === chId);
+  const ch = srv && srv.channels ? srv.channels.find(c => c.id === chId) : null;
 
   if ($('vrChanTitle')) {
     if (srvId === 'dm') {
@@ -3327,12 +3320,14 @@ function renderVoiceRoom() {
       const dmName = dm ? (dm.user.displayName || dm.user.username) : 'Amigo';
       $('vrChanTitle').textContent = `📞 Chamada Privada — @${dmName}`;
     } else {
-      $('vrChanTitle').textContent = `🔊 ${srv ? srv.name : ''} / ${ch ? ch.name : 'Chamada'}`;
+      const srvName = srv ? srv.name : 'JohnCord';
+      const chName = ch ? ch.name : 'Geral';
+      $('vrChanTitle').textContent = `🔊 ${srvName} / ${chName}`;
     }
   }
 
   const users = ((S.voiceStates[srvId] || {})[chId]) || [];
-  const otherUsers = users.filter(u => u.id !== S.user?.id);
+  const otherUsers = users.filter(u => u && u.id !== S.user?.id);
 
   // Determina se devemos renderizar em modo Spotlight (Foco na tela de alguém)
   let spotlightTarget = null;
