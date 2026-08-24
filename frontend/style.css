@@ -1402,22 +1402,29 @@ input, textarea, select {
 
 .voice-room-stage {
   flex: 1;
-  padding: 20px;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  padding: 24px;
   overflow-y: auto;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .vr-grid {
   width: 100%;
   height: 100%;
-  max-height: 100%;
+  min-height: 260px;
+  max-width: 1200px;
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  align-content: center;
-  max-width: 1300px;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-auto-rows: minmax(260px, 1fr);
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .vr-grid.has-screen {
@@ -1469,6 +1476,7 @@ input, textarea, select {
   height: 90px;
   background: var(--bg-card);
   border-radius: var(--radius-lg);
+  border: 1.5px solid var(--border-subtle);
   position: relative;
   overflow: hidden;
   display: flex;
@@ -1476,14 +1484,12 @@ input, textarea, select {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1.5px solid var(--border-subtle);
   transition: all var(--ease-smooth);
 }
 
 .vr-strip-tile:hover {
+  border-color: var(--border-light);
   transform: translateY(-2px);
-  border-color: var(--blurple);
-  background: var(--bg-card-hover);
 }
 
 .vr-strip-tile.active {
@@ -1514,25 +1520,27 @@ input, textarea, select {
 }
 
 .vr-tile {
-  background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: var(--radius-xl);
+  background: #2b2d31;
+  border-radius: 16px;
   position: relative;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 230px;
-  box-shadow: var(--shadow-md);
-  border: 1.5px solid var(--border-subtle);
+  min-height: 260px;
+  height: 100%;
+  width: 100%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.08);
   transition: all var(--ease-smooth);
+  box-sizing: border-box;
 }
 
 .vr-tile:hover {
-  border-color: var(--border-light);
+  border-color: rgba(255, 255, 255, 0.16);
   transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 }
 
 .vr-tile.is-screen {
@@ -1552,20 +1560,24 @@ input, textarea, select {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 16px;
   z-index: 2;
 }
 
 .vr-tile-avatar .user-avatar {
-  width: 92px;
-  height: 92px;
-  font-size: 40px;
+  width: 96px;
+  height: 96px;
+  font-size: 42px;
+  font-weight: 800;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--blurple, #5865f2);
+  color: #ffffff;
   border: 3.5px solid transparent;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.45);
   transition: all var(--ease-bounce);
 }
 

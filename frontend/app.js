@@ -465,18 +465,19 @@ function isImgUrl(url) {
 }
 
 function setAvatar(el, user) {
-  if (!el || !user) return;
-  const av = user.avatar;
-  const disp = user.displayName || user.username || '?';
+  if (!el) return;
+  const u = user || S.user || { username: 'Você' };
+  const av = u.avatar;
+  const disp = u.displayName || u.username || '?';
   if (isImgUrl(av)) {
     el.innerHTML = `<img src="${esc(av)}" alt="Avatar" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block;pointer-events:none">`;
     el.style.background = 'transparent';
-  } else if (av) {
+  } else if (av && av.length <= 4) {
     el.textContent = av;
-    el.style.background = user.color || '#5865f2';
+    el.style.background = u.color || '#5865f2';
   } else {
-    el.textContent = disp[0].toUpperCase();
-    el.style.background = user.color || '#5865f2';
+    el.textContent = (disp[0] || '?').toUpperCase();
+    el.style.background = u.color || '#5865f2';
   }
 }
 
