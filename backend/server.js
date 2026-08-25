@@ -171,6 +171,12 @@ const httpServer = http.createServer((req, res) => {
 
   let p = req.url.split('?')[0];
 
+  // Rota de Health Check / Status
+  if (p === '/api/status' || p === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ ok: true, app: 'JohnCord Backend', version: '2.0', online: true, time: Date.now() }));
+    return;
+  }
   // Rota de Upload de Arquivos / Mídia
   if (req.method === 'POST' && p === '/api/upload') {
     const filenameHeader = req.headers['x-filename'] || 'arquivo_' + Date.now();

@@ -3107,19 +3107,48 @@ if ($('btnSettings')) $('btnSettings').onclick = modalServerSettings;
 function modalServerSettings() {
   const current = getBackendUrl() || '';
   openModal(`
-    <h2>⚙️ Configuração do Servidor</h2>
-    <p>Para o site funcionar hospedado na <strong>Netlify</strong>, informe a URL do backend hospedado no <strong>Render</strong> (ou outro servidor Node.js).</p>
+    <h2>⚙️ Conexão com o Servidor (Backend)</h2>
+    <p>O JohnCord precisa de um servidor Node.js online para mensagens, chamadas e login.</p>
+
+    <div style="background:#1e1f22;padding:12px;border-radius:8px;margin-bottom:14px;border:1px solid rgba(255,255,255,0.08);font-size:13px;line-height:1.6">
+      <div style="font-weight:700;color:var(--header);margin-bottom:4px">🚀 Como conectar:</div>
+      <div><strong>Opção 1 (Online no Netlify):</strong> O servidor na nuvem (Render) pode levar <b>30 a 50 segundos</b> para acordar no primeiro acesso.</div>
+      <div style="margin-top:4px"><strong>Opção 2 (Testar no seu PC):</strong> Abra um terminal na pasta <code>backend</code> e rode <code>node server.js</code>. Abra <code>http://localhost:3000</code> no navegador.</div>
+    </div>
+
     <div style="margin-bottom:12px">
-      <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;font-weight:600">URL DO BACKEND (HTTP / HTTPS):</label>
-      <input class="input" id="mBackendUrl" placeholder="https://johncord-backend.onrender.com" value="${esc(current)}">
+      <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;font-weight:700">URL DO BACKEND (HTTP / HTTPS):</label>
+      <div style="display:flex;gap:8px">
+        <input class="input" id="mBackendUrl" placeholder="https://seu-servidor.onrender.com" value="${esc(current)}" style="margin-bottom:0">
+        <button class="btn btn-ghost" id="mTestBackend" type="button" style="white-space:nowrap;padding:8px 14px">📡 Testar Ping</button>
+      </div>
+      <div id="mPingStatus" style="font-size:12px;margin-top:6px;min-height:18px"></div>
     </div>
-    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.4">
-      💡 <em>Dica:</em> Se estiver rodando o servidor e o site juntos (localmente), deixe o campo vazio.
-    </div>
+
     <div class="modal-actions">
       ${S.user ? `<button class="btn btn-danger" onclick="logout()">🚪 Sair da Conta</button>` : `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>`}
       <button class="btn btn-primary" id="mSaveBackend">Salvar e Conectar</button>
     </div>`);
+
+  const pingStatus = $('mPingStatus');
+  const testBtn = $('mTestBackend');
+  if (testBtn) {
+    testBtn.onclick = async () => {
+      const url = $('mBackendUrl').value.trim() || location.origin;
+      pingStatus.innerHTML = '<span style="color:#faa61a">⏳ Testando conexão com ' + esc(url) + '...</span>';
+      try {
+        const resp = await fetch(`${url}/api/status`, { mode: 'cors', cache: 'no-store' });
+        if (resp.ok) {
+          const data = await resp.json();
+          pingStatus.innerHTML = '<span style="color:#23a55a;font-weight:700">✓ Servidor Online e Respondendo! (' + (data.app || 'JohnCord') + ')</span>';
+        } else {
+          pingStatus.innerHTML = '<span style="color:#f23f43">⚠ Servidor respondeu com código ' + resp.status + '</span>';
+        }
+      } catch (e) {
+        pingStatus.innerHTML = '<span style="color:#f23f43">✕ Não foi possível conectar a este endereço. Verifique se o servidor está rodando.</span>';
+      }
+    };
+  }
 
   $('mSaveBackend').onclick = () => {
     const val = $('mBackendUrl').value.trim();
