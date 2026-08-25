@@ -74,6 +74,25 @@ const S = {
 
 const $ = id => document.getElementById(id);
 
+/* ---------- Icones SVG minimalistas ---------- */
+const IC = {
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" x2="12" y1="18" y2="22"/>',
+  micOff: '<line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7 7 0 0 0 19 11v-1"/><path d="M5 10v1a7 7 0 0 0 12.21 4.79"/><line x1="12" x2="12" y1="18" y2="22"/><path d="M9 22h6"/><path d="M9 5a3 3 0 0 1 6 0v5"/>',
+  head: '<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>',
+  phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  phoneOff: '<path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.8 19.8 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" x2="1" y1="1" y2="23"/>',
+  palette: '<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.28-.44-.65-.44-1.12a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/>',
+  sliders: '<line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>',
+  compass: '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  volume: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>'
+};
+const ic = (n, s = 15) =>
+  `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
+
 function updateServerBadge(status, text) {
   const dot = $('statusDot');
   const txt = $('statusText');
@@ -1064,7 +1083,7 @@ function renderSidebar() {
     const discBtn = document.createElement('div');
     discBtn.className = 'chan-item active';
     discBtn.style.padding = '8px 10px';
-    discBtn.innerHTML = `<span>🧭</span><span style="font-weight:700">Comunidades Públicas</span>`;
+    discBtn.innerHTML = `<span>${ic('compass', 15)}</span><span style="font-weight:700">Comunidades Públicas</span>`;
     discBtn.onclick = openDiscover;
     body.appendChild(discBtn);
     
@@ -1197,7 +1216,7 @@ function renderSidebar() {
       limitBadge = `<span class="chan-limit-badge" style="margin-left:auto;color:${isFull ? '#f23f43' : 'var(--text-dim)'};font-weight:700">${users.length}/${ch.userLimit}</span>`;
     }
 
-    item.innerHTML = `🔊 <span style="font-weight:600">${esc(ch.name)}</span>${limitBadge}`;
+    item.innerHTML = `${ic('volume', 16)} <span style="font-weight:600">${esc(ch.name)}</span>${limitBadge}`;
     item.title = inThis ? 'Você está nesta call — clique para abrir a tela da call' : `Entrar em ${ch.name}`;
     item.onclick = () => {
       if (inThis) { openVoiceRoomView(); return; } // ja conectado: atalho para tela cheia
@@ -1230,9 +1249,9 @@ function renderSidebar() {
         nameSpan.textContent = u.displayName || u.username;
 
         const liveBadge = isLive ? `<span class="badge-live" style="font-size:9px;padding:1px 4px;margin-right:2px">AO VIVO</span>` : '';
-        const stateIcon = isDeaf ? '🎧' : (isMuted ? '🔇' : '');
+        const stateIcon = isDeaf ? ic('head', 12) : (isMuted ? ic('micOff', 12) : '');
         const isMe = S.user && u.id === S.user.id;
-        const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume" style="font-size:11px;padding:2px 4px;border-radius:3px;background:rgba(255,255,255,0.08);margin-left:4px">🔊</button>` : '';
+        const volBtn = !isMe ? `<button class="vu-btn" title="Ajustar Volume" style="font-size:11px;padding:2px 4px;border-radius:3px;background:rgba(255,255,255,0.08);margin-left:4px">${ic('volume', 11)}</button>` : '';
 
         vu.appendChild(av);
         vu.appendChild(nameSpan);
@@ -1329,7 +1348,7 @@ function renderHeader() {
             <button class="home-tab${S.homeTab === 'online' ? ' active' : ''}" id="tabOnline">Disponível (${onlineCount})</button>
             <button class="home-tab${S.homeTab === 'all' ? ' active' : ''}" id="tabAll">Todos (${S.friends.length})</button>
             <button class="home-tab${S.homeTab === 'pending' ? ' active' : ''}" id="tabPending">Pendentes${pendingCount ? ` <span style="background:var(--red,#f23f43);color:#fff;padding:1px 5px;border-radius:8px;font-size:10px">${pendingCount}</span>` : ''}</button>
-            <button class="home-tab btn-primary${S.homeTab === 'add' ? ' active' : ''}" id="tabAdd" style="${S.homeTab === 'add' ? 'background:var(--green,#23a55a);color:#fff;' : 'color:var(--green,#23a55a);background:rgba(35,165,90,0.12)'}">➕ Adicionar amigo</button>
+            <button class="home-tab btn-primary${S.homeTab === 'add' ? ' active' : ''}" id="tabAdd" style="${S.homeTab === 'add' ? 'background:var(--green,#23a55a);color:#fff;' : 'color:var(--green,#23a55a);background:rgba(35,165,90,0.12)'}">${ic('userPlus', 13)} Adicionar amigo</button>
           </div>
         `;
 
@@ -1352,7 +1371,7 @@ function renderHeader() {
   const headerActions = document.querySelector('.header-actions');
   if (headerActions) {
     headerActions.innerHTML = `
-      <button id="btnInvite" class="btn btn-small btn-primary" title="Convidar pessoas" style="${srv && !srv.permanent ? '' : 'display:none'}">👥 Convidar</button>
+      <button id="btnInvite" class="btn btn-small btn-primary" title="Convidar pessoas" style="${srv && !srv.permanent ? '' : 'display:none'}">${ic('userPlus', 13)} Convidar</button>
       <button id="btnMembers" class="btn btn-small btn-ghost" title="Membros">Membros</button>
     `;
     const bInv = headerActions.querySelector('#btnInvite');
@@ -1600,7 +1619,7 @@ function appendMsg(m, opts = {}) {
     const roles = (srv.roles || []).filter(r => mRoleIds.includes(r.id));
     if (roles.length > 0) {
       authorColor = roles[0].color;
-      roleBadge = `<span class="role-badge" style="background:${roles[0].color}">${esc(roles[0].name)}</span>`;
+      roleBadge = `<span class="role-badge" style="--rc:${roles[0].color}">${esc(roles[0].name)}</span>`;
     }
   }
 
@@ -1762,7 +1781,7 @@ function memberItem(m, topRole) {
   const disp = m.displayName || m.username;
   const nameColor = topRole ? topRole.color : (m.color || 'var(--text)');
   const custom = m.customStatus ? `<small style="color:#00a8fc;font-size:10px;display:block">${esc(m.customStatus)}</small>` : '';
-  const roleBadgeHtml = topRole ? `<span class="role-badge" style="background:${topRole.color}">${esc(topRole.name)}</span>` : '';
+  const roleBadgeHtml = topRole ? `<span class="role-badge" style="--rc:${topRole.color}">${esc(topRole.name)}</span>` : '';
   info.innerHTML = `<div><span style="font-weight:600;color:${nameColor}">${esc(disp)}</span>${roleBadgeHtml}</div>${custom}`;
   div.appendChild(av); div.appendChild(info);
   div.onclick = () => openUserProfileModal(m.id);
@@ -2593,7 +2612,7 @@ function modalInvite(serverId) {
   const inviteUrl = `${location.origin}/?join=${inviteCode}`;
 
   openModal(`
-    <h2>👥 Convidar amigos para ${esc(srv.name)}</h2>
+    <h2>${ic('users', 18)} Convidar amigos para ${esc(srv.name)}</h2>
     <p style="color:var(--text-dim);margin-bottom:14px">Envie este link ou código para seus amigos entrarem no servidor:</p>
     
     <label style="font-size:12px;color:var(--text-dim);font-weight:700;display:block;margin-bottom:6px">LINK DO CONVITE:</label>
@@ -3809,10 +3828,10 @@ function updateVoiceBar(serverId, channelId) {
       <span class="call-time-badge">${timeText}</span>
     </div>
     <div class="call-btns">
-      <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${S.muted ? '🔇 Mudo' : '🎙️ Falando'}</button>
-      <button class="call-btn${S.deafened ? ' on' : ''}" id="cbDeafen">${S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Ouvindo'}</button>
-      <button class="call-btn${S.screenSharing ? ' live' : ''}" id="cbScreen">${S.screenSharing ? '🛑 Parar Tela' : '🖥️ Tela'}</button>
-      <button class="call-btn danger" id="cbLeave">📞 Sair</button>
+      <button class="call-btn${S.muted ? ' on' : ''}" id="cbMute">${ic(S.muted ? 'micOff' : 'mic', 14)} ${S.muted ? 'Mudo' : 'Falando'}</button>
+      <button class="call-btn${S.deafened ? ' on' : ''}" id="cbDeafen">${ic('head', 14)} ${S.deafened ? 'Ensurdecido' : 'Ouvindo'}</button>
+      <button class="call-btn${S.screenSharing ? ' live' : ''}" id="cbScreen">${ic(S.screenSharing ? 'stop' : 'monitor', 14)} ${S.screenSharing ? 'Parar' : 'Tela'}</button>
+      <button class="call-btn danger" id="cbLeave">${ic('phoneOff', 14)} Sair</button>
     </div>`;
   $('userPanel').parentNode.insertBefore(bar, $('userPanel'));
   $('cbInfo').onclick = openVoiceRoomView;
@@ -3827,15 +3846,15 @@ function updateVoiceControls() {
   const btnD = $('vrBtnDeafen');
   const btnS = $('vrBtnScreen');
   if (btnM) {
-    btnM.textContent = S.muted ? '🔇 Microfone Mutado' : '🎤 Microfone Ativo';
+    btnM.innerHTML = `${ic(S.muted ? 'micOff' : 'mic', 14)} ${S.muted ? 'Microfone Mutado' : 'Microfone Ativo'}`;
     btnM.classList.toggle('on', S.muted);
   }
   if (btnD) {
-    btnD.textContent = S.deafened ? '🔇🎧 Ensurdecido' : '🎧 Áudio Ativo';
+    btnD.innerHTML = `${ic('head', 14)} ${S.deafened ? 'Ensurdecido' : 'Áudio Ativo'}`;
     btnD.classList.toggle('on', S.deafened);
   }
   if (btnS) {
-    btnS.textContent = S.screenSharing ? '🛑 Parar Transmissão' : '🖥️ Compartilhar Tela';
+    btnS.innerHTML = `${ic(S.screenSharing ? 'stop' : 'monitor', 14)} ${S.screenSharing ? 'Parar Transmissão' : 'Compartilhar Tela'}`;
     btnS.classList.toggle('live', S.screenSharing);
   }
 }

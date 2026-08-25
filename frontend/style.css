@@ -2291,13 +2291,87 @@ input, textarea, select {
 
 .role-chip {
   font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
+  font-weight: 600;
+  padding: 3px 10px 3px 8px;
   border-radius: var(--radius-full);
   color: #fff;
   cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--rc, #5865f2) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rc, #5865f2) 35%, transparent);
+  box-shadow: none;
 }
+
+.role-chip::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rc, #5865f2);
+  flex-shrink: 0;
+}
+
+/* Badge de cargo minimalista (dot + nome, fundo translucido) */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 1.5px 8px 1.5px 6px;
+  border-radius: var(--radius-full);
+  vertical-align: middle;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--rc, #5865f2) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rc, #5865f2) 30%, transparent);
+  color: color-mix(in srgb, var(--rc, #5865f2) 70%, #fff);
+}
+
+.role-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rc, #5865f2);
+  flex-shrink: 0;
+}
+
+/* ============ ICONES SVG MINIMALISTAS ============ */
+.ic {
+  vertical-align: -0.18em;
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
+button .ic { transition: transform 0.15s ease; }
+button:hover .ic { opacity: 1; }
+.call-btn.danger:hover .ic,
+.btn-danger:hover .ic { transform: scale(1.08); }
+
+/* Alinhar icones dentro de botoes com texto */
+.btn-small .ic + * ,
+.home-tab .ic { margin-right: 4px; }
+
+/* Rail: botoes com icone */
+.rail-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-discover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rail-discover:hover { color: var(--blurple); }
+
+/* Icon-btn do painel do usuario: cor mais discreta, realce no hover */
+.icon-btn svg { display: block; }
+.icon-btn { color: var(--text-dim, #949ba4); }
+.icon-btn:hover { color: var(--header, #f2f3f5); }
 
 /* ==========================================================================
    MODAIS & OVERLAY
