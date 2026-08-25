@@ -172,7 +172,7 @@ const httpServer = http.createServer((req, res) => {
   let p = req.url.split('?')[0];
 
   // Rota de Health Check / Status
-  if (p === '/api/status' || p === '/api/health') {
+  if (p === '/api/status' || p === '/api/health' || p === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify({ ok: true, app: 'JohnCord Backend', version: '2.0', online: true, time: Date.now() }));
     return;
@@ -980,12 +980,31 @@ wss.on('connection', (ws) => {
     if (me) {
       leaveVoice();
       online.delete(ws);
-      byUser.delete(me.id);
-      setTimeout(() => { if (!byUser.has(me.id)) broadcastUsers(); }, 500);
+      // So remove a sessao se ESTA conexao ainda for a ativa do usuario.
+      // Sem isso, ao reconectar/refresh, o socket antigo fechava DEPOIS e
+      // apagava a sessao nova -> usuario sumia do ar em tempo real.
+      if (byUser.get(me.id) === ws) byUser.delete(me.id);
       broadcastUsers();
     }
   });
+
+  // Heartbeat: mata conexoes mortas rapidamente (rede caiu, app suspenso)
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 });
+
+// Verifica conexoes vivas a cada 30s; fantasmas sao removidos na hora
+const HEARTBEAT_MS = 30000;
+setInterval(() => {
+  wss.clients.forEach(socket => {
+    if (socket.isAlive === false) {
+      try { socket.terminate(); } catch (e) {}
+      return;
+    }
+    socket.isAlive = false;
+    try { socket.ping(); } catch (e) {}
+  });
+}, HEARTBEAT_MS);
 
 function buildDmList(userId) {
   const u = db.users[userId];

@@ -158,7 +158,11 @@ function connect() {
           if (ws === sock) {
             ws = null;
             updateServerBadge('connecting', 'Reconectando ao servidor...');
-            if (S.user) toast('Conexão perdida. Reconectando...');
+            if (S.user) {
+              toast('Conexão perdida. Reconectando...');
+              // Limpa TODO o estado da call para nao sobrar fantasma
+              teardownVoiceLocal();
+            }
             clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(connect, 2000);
           }
@@ -355,6 +359,7 @@ function handle(d) {
     case 'sessionReplaced':
       S.user = null;
       lastAuth = null;
+      teardownVoiceLocal();
       try { localStorage.removeItem('jc_auth'); } catch (e) {}
       $('app').style.display = 'none';
       $('authScreen').style.display = 'flex';
@@ -1168,7 +1173,6 @@ function renderSidebar() {
     item.onclick = () => joinVoice(srv.id, ch.id);
     body.appendChild(item);
 
-    const users = ((S.voiceStates[srv.id] || {})[ch.id]) || [];
     if (users.length) {
       const wrap = document.createElement('div');
       wrap.className = 'voice-users';
@@ -3521,6 +3525,7 @@ function openMicHelpModal() {
 }
 
 function leaveVoice() {
+  const prevVoice = S.voice;
   cleanupLocalVAD();
   stopScreenShare(false);
   stopVoiceTimer();
@@ -3534,9 +3539,8 @@ function leaveVoice() {
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
 
-  const prevVoice = S.voice;
   if (S.voice) {
-    // Remove usuário otimisticamente do estado de voz
+    // Remove usuario otimisticamente do estado de voz
     if (S.voiceStates[S.voice.serverId] && S.voiceStates[S.voice.serverId][S.voice.channelId]) {
       S.voiceStates[S.voice.serverId][S.voice.channelId] = S.voiceStates[S.voice.serverId][S.voice.channelId].filter(u => u.id !== S.user?.id);
     }
@@ -3549,6 +3553,7 @@ function leaveVoice() {
   S.screenSharing = false;
   updateVoiceButtons();
   updateVoiceBar(null);
+  renderVoiceRoom();
 
   // Sai direto da tela da call e retorna ao chat de texto
   if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
@@ -3573,6 +3578,29 @@ function leaveVoice() {
     renderSidebar();
     renderHeader();
   }
+}
+
+// Teardown de emergencia quando a conexao cai: limpa call sem avisar o servidor
+function teardownVoiceLocal() {
+  try { cleanupLocalVAD(); } catch (e) {}
+  try { stopScreenShare(false); } catch (e) {}
+  try { stopVoiceTimer(); } catch (e) {}
+  try { stopRelaySender(); } catch (e) {}
+  Object.values(peers).forEach(pc => { clearTimeout(pc._watchdog); pc.close(); });
+  for (const k of Object.keys(peers)) delete peers[k];
+  for (const k of Object.keys(pendingCandidates)) delete pendingCandidates[k];
+  for (const k of Object.keys(connStatus)) delete connStatus[k];
+  for (const k of Object.keys(peerAudioStreams)) delete peerAudioStreams[k];
+  for (const k of Object.keys(peerVideoStreams)) delete peerVideoStreams[k];
+  try { if (dmPc || S.dmCall) endDmCall(true); } catch (e) {}
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  document.querySelectorAll('audio.remote-audio, video.remote-video').forEach(el => el.remove());
+  S.voice = null;
+  S.muted = false;
+  S.deafened = false;
+  S.screenSharing = false;
+  updateVoiceButtons();
+  updateVoiceBar(null);
 }
 
 function toggleMute() {

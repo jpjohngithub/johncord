@@ -36,10 +36,24 @@ Para amigos acessarem na mesma rede, use seu IP local (ex: `http://192.168.x.x:3
 
 ## 🌐 Deploy online
 
-### 1. Backend no Render
-1. No [Render](https://render.com), crie um **Web Service** apontando para este repositório
-2. O `render.yaml` já está configurado (`rootDir: backend`)
-3. Copie a URL gerada (ex: `https://johncord-backend.onrender.com`)
+### 1. Backend no Render ⚠️ CONFIGURAÇÃO OBRIGATÓRIA
+
+No dashboard do Render, o serviço precisa estar assim (Settings → Build & Deploy):
+
+| Campo | Valor |
+|---|---|
+| **Root Directory** | *(vazio — deixa em branco!)* |
+| **Build Command** | `npm install` |
+| **Start Command** | `npm start` |
+| **Health Check Path** | `/healthz` |
+
+> ⚠️ Se o serviço antigo tiver comandos com `prisma`, **apague/substitua** — o JohnCord novo não usa Prisma e o build falha, deixando o site fora do ar.
+
+Depois: **Manual Deploy → Clear build cache & deploy**.
+
+Verifique: `https://SEU-APP.onrender.com/healthz` deve responder `{"ok":true,...}`
+
+> 💡 O plano gratuito do Render "dorme" após 15 min sem uso (primeiro acesso demora ~50s). Para manter acordado, crie um monitor grátis no UptimeRobot apontando para `/healthz`.
 
 ### 2. Frontend na Netlify
 1. A Netlify está vinculada ao repositório GitHub e publica automaticamente a pasta `frontend/` (configurada via `netlify.toml`).
