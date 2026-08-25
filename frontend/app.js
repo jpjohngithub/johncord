@@ -11,17 +11,23 @@ let candidateIndex = 0;
 
 function getCandidateUrls() {
   const custom = localStorage.getItem('johncord_backend');
+  const lastWorking = localStorage.getItem('johncord_last_working_backend');
   const fromConfig = window.JOHNCORD_BACKEND;
   const list = [];
+
   if (custom && custom.trim()) list.push(custom.trim().replace(/\/+$/, ''));
-  if (fromConfig && fromConfig.trim()) list.push(fromConfig.trim().replace(/\/+$/, ''));
-  
+  if (lastWorking && lastWorking.trim() && !list.includes(lastWorking.trim())) list.push(lastWorking.trim().replace(/\/+$/, ''));
+  if (fromConfig && fromConfig.trim() && !list.includes(fromConfig.trim())) list.push(fromConfig.trim().replace(/\/+$/, ''));
+
   if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
     if (location.port && location.port !== '3000') {
       list.push(`${location.protocol}//${location.hostname}:3000`);
     } else {
       list.push(location.origin);
     }
+  } else if (location.protocol !== 'https:') {
+    list.push('http://localhost:3000');
+    list.push('http://127.0.0.1:3000');
   }
 
   DEFAULT_SERVERS.forEach(url => {
@@ -33,20 +39,13 @@ function getCandidateUrls() {
 
 function getBackendUrl() {
   const candidates = getCandidateUrls();
-  return candidates[candidateIndex % candidates.length] || '';
-}
-
-function getWsUrl() {
-  const backend = getBackendUrl();
-  if (backend) {
-    return backend.replace(/^http/, 'ws');
-  }
-  return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+  return candidates[0] || (location.protocol === 'https:' ? 'https://' : 'http://') + location.host;
 }
 
 let ws = null;
 let lastAuth = null;
 let reconnectTimer = null;
+let connectingSockets = [];
 
 const S = {
   user: null,
@@ -89,66 +88,96 @@ function triggerWakeUp(httpUrl) {
   } catch (e) {}
 }
 
-/* ---------- WebSocket ---------- */
+/* ---------- WebSocket com Auto-Conexão Turbo Paralela ---------- */
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
   clearTimeout(reconnectTimer);
-  const targetWs = getWsUrl();
-  const backendUrl = getBackendUrl();
-  const displayHost = backendUrl ? backendUrl.replace(/^https?:\/\//, '') : location.host;
-  
-  updateServerBadge('connecting', `Conectando em ${displayHost}...`);
-  triggerWakeUp(backendUrl);
 
-  try {
-    ws = new WebSocket(targetWs);
-  } catch (err) {
-    updateServerBadge('connecting', 'Tentando conectar ao servidor...');
-    rotateCandidateAndRetry();
-    return;
-  }
+  const candidates = getCandidateUrls();
+  if (!candidates.length) candidates.push(location.origin);
 
-  const connTimeout = setTimeout(() => {
-    if (ws && ws.readyState === WebSocket.CONNECTING) {
-      updateServerBadge('connecting', 'Acordando servidor na nuvem (Render)...');
+  updateServerBadge('connecting', 'Conectando ao servidor...');
+
+  // Fechar tentativas anteriores
+  connectingSockets.forEach(s => {
+    try { s.close(); } catch (e) {}
+  });
+  connectingSockets = [];
+
+  let connected = false;
+
+  candidates.forEach(url => {
+    triggerWakeUp(url);
+
+    let wsUrl = url.replace(/^http/, 'ws');
+    if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
+      wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + wsUrl;
     }
-  }, 2500);
 
-  ws.onopen = () => {
-    clearTimeout(connTimeout);
-    updateServerBadge('connected', `Conectado: ${displayHost}`);
-    if (lastAuth) send(lastAuth);
-  };
-
-  ws.onmessage = e => {
     try {
-      handle(JSON.parse(e.data));
-    } catch (err) {
-      console.error('Erro ao processar mensagem:', err);
-    }
-  };
+      const sock = new WebSocket(wsUrl);
+      connectingSockets.push(sock);
 
-  ws.onerror = () => {
-    clearTimeout(connTimeout);
-    updateServerBadge('connecting', 'Tentando reconectar...');
-  };
+      sock.onopen = () => {
+        if (connected) {
+          try { sock.close(); } catch (e) {}
+          return;
+        }
+        connected = true;
+        ws = sock;
 
-  ws.onclose = () => {
-    clearTimeout(connTimeout);
-    updateServerBadge('connecting', 'Reconectando ao servidor...');
-    if (S.user) toast('Conexão perdida. Reconectando...');
-    rotateCandidateAndRetry();
-  };
-}
+        // Fecha os outros que estavam tentando
+        connectingSockets.forEach(s => {
+          if (s !== ws) {
+            try { s.close(); } catch (e) {}
+          }
+        });
+        connectingSockets = [];
 
-function rotateCandidateAndRetry() {
+        const hostDisplay = url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        updateServerBadge('connected', `Conectado: ${hostDisplay}`);
+        localStorage.setItem('johncord_last_working_backend', url);
+
+        if (lastAuth) send(lastAuth);
+
+        sock.onmessage = e => {
+          try {
+            handle(JSON.parse(e.data));
+          } catch (err) {
+            console.error('Erro ao processar mensagem:', err);
+          }
+        };
+
+        sock.onerror = () => {
+          if (ws === sock) updateServerBadge('connecting', 'Tentando reconectar...');
+        };
+
+        sock.onclose = () => {
+          if (ws === sock) {
+            ws = null;
+            updateServerBadge('connecting', 'Reconectando ao servidor...');
+            if (S.user) toast('Conexão perdida. Reconectando...');
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, 2000);
+          }
+        };
+      };
+
+      sock.onerror = () => {};
+      sock.onclose = () => {};
+    } catch (e) {}
+  });
+
+  // Se nenhum conectar em 3 segundos, agenda nova tentativa automática
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
-    candidateIndex++;
-    connect();
-  }, 2500);
+    if (!connected && (!ws || ws.readyState !== WebSocket.OPEN)) {
+      updateServerBadge('connecting', 'Tentando conectar ao servidor...');
+      connect();
+    }
+  }, 3000);
 }
 
 function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
