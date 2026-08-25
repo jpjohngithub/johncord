@@ -3118,9 +3118,13 @@ function modalServerSettings() {
 
     <div style="margin-bottom:12px">
       <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;font-weight:700">URL DO BACKEND (HTTP / HTTPS):</label>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <input class="input" id="mBackendUrl" placeholder="https://seu-servidor.onrender.com" value="${esc(current)}" style="margin-bottom:0">
         <button class="btn btn-ghost" id="mTestBackend" type="button" style="white-space:nowrap;padding:8px 14px">📡 Testar Ping</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn btn-ghost btn-small" type="button" id="btnPresetLocal" style="font-size:11.5px">🏠 Localhost (3000)</button>
+        <button class="btn btn-ghost btn-small" type="button" id="btnPresetRender" style="font-size:11.5px">☁️ Render Nuvem</button>
       </div>
       <div id="mPingStatus" style="font-size:12px;margin-top:6px;min-height:18px"></div>
     </div>
@@ -3132,6 +3136,20 @@ function modalServerSettings() {
 
   const pingStatus = $('mPingStatus');
   const testBtn = $('mTestBackend');
+  
+  if ($('btnPresetLocal')) {
+    $('btnPresetLocal').onclick = () => {
+      $('mBackendUrl').value = 'http://localhost:3000';
+      if (testBtn) testBtn.click();
+    };
+  }
+  if ($('btnPresetRender')) {
+    $('btnPresetRender').onclick = () => {
+      $('mBackendUrl').value = 'https://johncord-backend.onrender.com';
+      if (testBtn) testBtn.click();
+    };
+  }
+
   if (testBtn) {
     testBtn.onclick = async () => {
       const url = $('mBackendUrl').value.trim() || location.origin;
@@ -3166,6 +3184,10 @@ function modalServerSettings() {
   };
   $('mBackendUrl').focus();
 }
+
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.modalServerSettings = modalServerSettings;
 
 /* ---------- Controle de Volume Individual ---------- */
 function getUserVolume(userId) {

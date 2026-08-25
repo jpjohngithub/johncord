@@ -2311,7 +2311,7 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 99999 !important;
   padding: 20px;
 }
 
