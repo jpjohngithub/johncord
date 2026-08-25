@@ -20,11 +20,28 @@
     <div class="auth-logo"><img src="logo.jpg" alt="Logo" style="width:48px;height:48px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4)"> JohnCord</div>
     <div class="auth-sub">Converse e faça call com seus amigos</div>
     <div id="authError" class="auth-error" style="display:none"></div>
-    <div class="auth-server-badge" id="authServerBadge">
-      <span class="dot-indicator" id="statusDot"></span>
-      <span id="statusText">Conectando ao servidor...</span>
-      <button id="btnConfigServer" class="server-change-btn" type="button">⚙️ Configurar</button>
+    
+    <!-- STATUS E CONFIGURAÇÃO DIRETA DO SERVIDOR -->
+    <div class="auth-server-direct-box" style="background:#1e1f22;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="dot-indicator" id="statusDot"></span>
+          <span id="statusText" style="font-size:12px;font-weight:700;color:var(--header)">Conectando ao servidor...</span>
+        </div>
+        <button id="btnReconnect" class="btn btn-ghost btn-small" type="button" style="font-size:11px;padding:2px 8px">🔄 Reconectar</button>
+      </div>
+
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="authServerInput" class="input" placeholder="URL do Servidor (ex: http://localhost:3000)" style="margin-bottom:0;font-size:12px;padding:8px 10px;flex:1">
+        <button id="btnSaveServerInput" class="btn btn-primary btn-small" type="button" style="white-space:nowrap;padding:8px 12px;font-size:12px">Conectar</button>
+      </div>
+
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button id="btnQuickLocal" class="btn btn-ghost btn-small" type="button" style="font-size:11px;padding:3px 8px">🏠 Localhost (3000)</button>
+        <button id="btnQuickRender" class="btn btn-ghost btn-small" type="button" style="font-size:11px;padding:3px 8px">☁️ Render Nuvem</button>
+      </div>
     </div>
+
     <input id="authUser" class="input" placeholder="Nome de usuário" maxlength="20" autocomplete="username">
     <input id="authPass" type="password" class="input" placeholder="Senha" autocomplete="current-password">
     <button id="btnLogin" class="btn btn-primary">Entrar</button>

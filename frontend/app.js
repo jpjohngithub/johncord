@@ -339,7 +339,46 @@ $('btnLogin').onclick = () => auth('login');
 $('btnRegister').onclick = () => auth('register');
 $('authUser').onkeydown = e => { if (e.key === 'Enter') $('authPass').focus(); };
 $('authPass').onkeydown = e => { if (e.key === 'Enter') auth('login'); };
-if ($('btnConfigServer')) $('btnConfigServer').onclick = modalServerSettings;
+
+// Inicializar campo direto de servidor na tela de login
+if ($('authServerInput')) {
+  $('authServerInput').value = getBackendUrl();
+
+  const applyCustomServer = (url) => {
+    const val = (url !== undefined ? url : $('authServerInput').value).trim();
+    if (val) {
+      localStorage.setItem('johncord_backend', val);
+      $('authServerInput').value = val;
+    } else {
+      localStorage.removeItem('johncord_backend');
+    }
+    toast('Conectando ao servidor: ' + (val || 'Padrão'));
+    if (ws) {
+      try { ws.close(); } catch (e) {}
+    }
+    connect();
+  };
+
+  $('authServerInput').onkeydown = e => {
+    if (e.key === 'Enter') applyCustomServer();
+  };
+
+  if ($('btnSaveServerInput')) {
+    $('btnSaveServerInput').onclick = () => applyCustomServer();
+  }
+  if ($('btnReconnect')) {
+    $('btnReconnect').onclick = () => {
+      if (ws) { try { ws.close(); } catch (e) {} }
+      connect();
+    };
+  }
+  if ($('btnQuickLocal')) {
+    $('btnQuickLocal').onclick = () => applyCustomServer('http://localhost:3000');
+  }
+  if ($('btnQuickRender')) {
+    $('btnQuickRender').onclick = () => applyCustomServer('https://johncord-backend.onrender.com');
+  }
+}
 
 // Carregar credenciais salvas no navegador
 try {
