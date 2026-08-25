@@ -232,34 +232,53 @@ function handle(d) {
       break;
     case 'msgNew': {
       const key = `${d.serverId}:${d.channelId}`;
-      const list = S.channelCache[key] || [];
-      const alreadyRendered = list.some(m => m.id === d.msg.id || (m.userId === d.msg.userId && m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 4000));
+      if (!S.channelCache[key]) S.channelCache[key] = [];
+      const list = S.channelCache[key];
+
+      // 1) Confirma mensagem otimista nossa: troca a local pela oficial (DOM ja tem o conteudo)
+      const pendIdx = list.findIndex(m =>
+        m._local && m.userId === d.msg.userId &&
+        m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 60000);
+      if (pendIdx !== -1) {
+        list[pendIdx] = d.msg;
+        break;
+      }
+      // 2) Ja recebida pelo id oficial? ignora
+      if (list.some(m => m.id === d.msg.id)) break;
+
       cacheMsg(key, d.msg);
-      if (!alreadyRendered) {
-        if (S.view === d.serverId && S.channelId === d.channelId) {
-          const welcome = document.querySelector('.channel-welcome');
-          if (welcome) welcome.remove();
-          appendMsg(d.msg);
-        } else {
-          if (d.msg.userId !== S.user?.id) playNotifySound();
-        }
+      if (S.view === d.serverId && S.channelId === d.channelId) {
+        const welcome = document.querySelector('.channel-welcome');
+        if (welcome) welcome.remove();
+        appendMsg(d.msg);
+      } else {
+        if (d.msg.userId !== S.user?.id) playNotifySound();
       }
       break;
     }
     case 'dmNew': {
       if (!S.dms[d.dmId]) S.dms[d.dmId] = { messages: [] };
       const dmMessages = S.dms[d.dmId].messages;
-      const alreadyRendered = dmMessages.some(m => m.id === d.msg.id || (m.userId === d.msg.userId && m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 4000));
-      if (!alreadyRendered) {
-        dmMessages.push(d.msg);
-        if (S.view === 'home' && (S.dmId === d.dmId || S.dmId === 'user:' + d.msg.userId)) {
-          if (S.dmId !== d.dmId) { ensureDmInList(d.withUserId, d.dmId); S.dmId = d.dmId; renderSidebar(); renderHeader(); }
-          appendMsg(d.msg);
-        } else {
-          if (d.msg.userId !== S.user?.id) {
-            toast(`💬 Nova mensagem de ${d.msg.displayName || d.msg.username}`);
-            playNotifySound();
-          }
+
+      // Confirma mensagem otimista nossa
+      const pendIdx = dmMessages.findIndex(m =>
+        m._local && m.userId === d.msg.userId &&
+        m.content === d.msg.content && Math.abs(m.ts - d.msg.ts) < 60000);
+      if (pendIdx !== -1) {
+        dmMessages[pendIdx] = d.msg;
+        ensureDmInList(d.withUserId, d.dmId);
+        break;
+      }
+      if (dmMessages.some(m => m.id === d.msg.id)) { ensureDmInList(d.withUserId, d.dmId); break; }
+
+      dmMessages.push(d.msg);
+      if (S.view === 'home' && (S.dmId === d.dmId || S.dmId === 'user:' + d.msg.userId)) {
+        if (S.dmId !== d.dmId) { ensureDmInList(d.withUserId, d.dmId); S.dmId = d.dmId; renderSidebar(); renderHeader(); }
+        appendMsg(d.msg);
+      } else {
+        if (d.msg.userId !== S.user?.id) {
+          toast(`💬 Nova mensagem de ${d.msg.displayName || d.msg.username}`);
+          playNotifySound();
         }
       }
       ensureDmInList(d.withUserId, d.dmId);
@@ -277,10 +296,16 @@ function handle(d) {
       $('memberList').innerHTML = '';
       renderDmMessages();
       break;
-    case 'history':
-      S.channelCache[`${d.serverId}:${d.channelId}`] = d.msgs;
+    case 'history': {
+      const hKey = `${d.serverId}:${d.channelId}`;
+      // Preserva mensagens otimistas enviadas que o servidor ainda nao confirmou
+      const pendLocal = (S.channelCache[hKey] || []).filter(m =>
+        m._local && !(d.msgs || []).some(x =>
+          x.userId === m.userId && x.content === m.content && Math.abs(x.ts - m.ts) < 60000));
+      S.channelCache[hKey] = [...(d.msgs || []), ...pendLocal];
       if (S.view === d.serverId && S.channelId === d.channelId) renderMessages();
       break;
+    }
     case 'dmHistory':
       if (!S.dms[d.dmId]) S.dms[d.dmId] = {};
       S.dms[d.dmId].messages = d.msgs;
@@ -2322,6 +2347,7 @@ function sendCurrentWithAttachment(overrideAttachment = null) {
 
   const localMsg = {
     id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    _local: true,
     userId: S.user.id,
     username: S.user.username,
     displayName: S.user.displayName || S.user.username,
