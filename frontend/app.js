@@ -2,9 +2,8 @@
 'use strict';
 
 const DEFAULT_SERVERS = [
-  'https://johncord-backend.onrender.com',
-  'https://johncord.onrender.com',
-  'https://johncord-2-0.onrender.com'
+  'https://seu-johncord.onrender.com',
+  'https://johncord-backend.onrender.com'
 ];
 
 let candidateIndex = 0;
@@ -376,7 +375,7 @@ if ($('authServerInput')) {
     $('btnQuickLocal').onclick = () => applyCustomServer('http://localhost:3000');
   }
   if ($('btnQuickRender')) {
-    $('btnQuickRender').onclick = () => applyCustomServer('https://johncord-backend.onrender.com');
+    $('btnQuickRender').onclick = () => applyCustomServer('https://seu-johncord.onrender.com');
   }
 }
 

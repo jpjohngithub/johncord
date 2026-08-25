@@ -1,8 +1,6 @@
 // Configuracao do frontend JohnCord
-// Deixe vazio ('') quando o site e o servidor rodam juntos (local ou Render).
-// Quando o frontend esta na Netlify e o backend no Render, coloque aqui a URL do backend:
-// window.JOHNCORD_BACKEND = 'https://johncord-backend.onrender.com';
-window.JOHNCORD_BACKEND = '';
+// URL do backend padrao no Render:
+window.JOHNCORD_BACKEND = 'https://seu-johncord.onrender.com';
 
 // SERVIDOR TURN - necessario para calls funcionarem 100% entre redes diferentes.
 // Crie gratis em https://dashboard.metered.ca (sem cartao, 2 minutos):
