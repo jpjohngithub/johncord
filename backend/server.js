@@ -93,7 +93,9 @@ function serversOf(userId) {
       inviteCode: s.inviteCode,
       channels: s.channels,
       roles: s.roles || [],
-      memberRoles: s.memberRoles || {}
+      memberRoles: s.memberRoles || {},
+      isPublic: !!s.isPublic,
+      description: s.description || ''
     }));
 }
 function dmKey(a, b) { return [a, b].sort().join('|'); }

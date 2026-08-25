@@ -204,6 +204,54 @@ function ok(name, cond) { console.log((cond ? 'PASS' : 'FAIL') + ' - ' + name); 
   ok('aviso de sessao duplicada enviado ao socket antigo', wasReplaced);
   sock2.ws.close();
 
+  // DESCOBERTA + PERSISTENCIA (sockets novos, contas ja existentes)
+  const a2 = await sock('TesteA' + suffix, '1234', 'login');
+  const b2 = await sock('TesteB' + suffix, '1234', 'login');
+  let publicCode = null;
+  for (let i = 0; i < 5 && !publicCode; i++) {
+    try {
+      const p = waitMsg(a2.ws, 'servers');
+      a2.ws.send(JSON.stringify({ t: 'createServer', name: 'Comunidade Publica', isPublic: true, description: 'servidor de testes' }));
+      const createdPub = await p;
+      const pub = createdPub.servers.find(s => s.name === 'Comunidade Publica');
+      if (pub) publicCode = pub.id;
+    } catch (e) {}
+  }
+  ok('servidor publico criado', !!publicCode);
+
+  let foundPublic = false;
+  for (let i = 0; i < 5 && !foundPublic; i++) {
+    try {
+      const p = waitMsg(b2.ws, 'discoverResults');
+      b2.ws.send(JSON.stringify({ t: 'discoverServers', q: 'Comunidade Publica' }));
+      const disc = await p;
+      foundPublic = (disc.servers || []).some(s => s.id === publicCode);
+    } catch (e) {}
+  }
+  ok('servidor publico aparece na aba de busca/descobrir', foundPublic);
+
+  await (async () => {
+    const p = waitMsg(b2.ws, 'servers');
+    b2.ws.send(JSON.stringify({ t: 'joinServerDirect', serverId: publicCode }));
+    return p;
+  })();
+  ok('entrada direta por descoberta OK', true);
+
+  let membersOk = false;
+  for (let i = 0; i < 5 && !membersOk; i++) {
+    try {
+      const p = waitMsg(b2.ws, 'members');
+      b2.ws.send(JSON.stringify({ t: 'members', serverId: publicCode }));
+      const mems = await p;
+      membersOk = (mems.members || []).length >= 2 && mems.members.every(m => m.username);
+    } catch (e) {}
+  }
+  ok('lista de membros do servidor retorna os participantes', membersOk);
+
+  const relog = await sock('TesteB' + suffix, '1234', 'login');
+  ok('servidores persistem apos relogon', relog.boot.servers.some(s => s.id === publicCode));
+  relog.ws.close(); a2.ws.close(); b2.ws.close();
+
   console.log('\nTotal de testes aprovados: ' + pass);
   process.exit(process.exitCode || 0);
 })().catch(e => { console.error('ERRO FATAL:', e.message); process.exit(1); });

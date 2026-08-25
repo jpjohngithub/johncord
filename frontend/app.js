@@ -520,6 +520,9 @@ function openChannel(chId) {
     // ABA DE CHAT DE TEXTO
     if ($('chatView')) $('chatView').style.display = 'flex';
     if ($('voiceRoomView')) $('voiceRoomView').style.display = 'none';
+    // Renderiza imediatamente o que ja tem em cache (evita conteudo antigo travado)
+    S.lastAuthor = null;
+    renderMessages();
     requestHistory();
   }
 
@@ -1170,7 +1173,11 @@ function renderSidebar() {
     }
 
     item.innerHTML = `🔊 <span style="font-weight:600">${esc(ch.name)}</span>${limitBadge}`;
-    item.onclick = () => joinVoice(srv.id, ch.id);
+    item.title = inThis ? 'Você está nesta call — clique para abrir a tela da call' : `Entrar em ${ch.name}`;
+    item.onclick = () => {
+      if (inThis) { openVoiceRoomView(); return; } // ja conectado: atalho para tela cheia
+      joinVoice(srv.id, ch.id);
+    };
     body.appendChild(item);
 
     if (users.length) {
@@ -1332,6 +1339,12 @@ function renderHeader() {
 
 function requestHistory() {
   if (S.view !== 'home' && S.channelId) send({ t: 'history', serverId: S.view, channelId: S.channelId });
+}
+
+function toggleMemberList() {
+  const ml = $('memberList');
+  if (!ml) return;
+  ml.style.display = (ml.style.display === 'none') ? '' : 'none';
 }
 
 function renderActiveCallBanner(container) {
