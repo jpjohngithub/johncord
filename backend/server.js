@@ -51,6 +51,7 @@ if (!db.servers[GENERAL_ID]) {
 const online = new Map();   // ws -> userId
 const byUser = new Map();   // userId -> ws
 const voice = new Map();    // userId -> {serverId, channelId, muted}
+const ytRooms = new Map();  // roomKey -> {videoId, action, time, updatedAt, by}
 const typing = new Map();   // key `${serverId}:${channelId}:${userId}` -> timeout
 
 // ---------- Helpers ----------
@@ -882,6 +883,8 @@ wss.on('connection', (ws) => {
       // informar quem já está na call para o novo
       const others = [...voice.entries()].filter(([u, v]) => v.channelId === d.channelId && v.serverId === d.serverId && u !== me.id).map(([u]) => u);
       send(ws, { t: 'voicePeers', peers: others });
+      const currentYt = ytRooms.get(`${d.serverId}:${d.channelId}`);
+      if (currentYt) send(ws, { t: 'ytSync', ...currentYt, isInitial: true });
       return;
     }
     if (d.t === 'dmCallDecline') {
@@ -942,6 +945,41 @@ wss.on('connection', (ws) => {
       leaveVoice();
       return;
     }
+    if (d.t === 'callReaction') {
+      const v = voice.get(me.id);
+      if (v) {
+        const roomPeers = [...voice.entries()]
+          .filter(([u, vInfo]) => vInfo.channelId === v.channelId && vInfo.serverId === v.serverId && u !== me.id)
+          .map(([u]) => u);
+        roomPeers.forEach(pid => {
+          sendTo(pid, { t: 'callReaction', from: me.id, username: me.displayName || me.username, emoji: d.emoji });
+        });
+      }
+      return;
+    }
+    if (d.t === 'ytSync') {
+      const v = voice.get(me.id);
+      const roomKey = v ? `${v.serverId}:${v.channelId}` : (d.channelId ? `${d.serverId || 'dm'}:${d.channelId}` : null);
+      if (!roomKey) return;
+      if (d.action === 'close') {
+        ytRooms.delete(roomKey);
+      } else {
+        ytRooms.set(roomKey, {
+          videoId: d.videoId,
+          action: d.action,
+          time: Number(d.time) || 0,
+          updatedAt: Date.now(),
+          by: me.displayName || me.username
+        });
+      }
+      const roomPeers = [...voice.entries()]
+        .filter(([u, vInfo]) => `${vInfo.serverId}:${vInfo.channelId}` === roomKey && u !== me.id)
+        .map(([u]) => u);
+      roomPeers.forEach(pid => {
+        sendTo(pid, { t: 'ytSync', ...d, from: me.id, fromName: me.displayName || me.username });
+      });
+      return;
+    }
     if (d.t === 'signal') {
       sendTo(d.to, { t: 'signal', from: me.id, data: d.data });
       return;
@@ -963,9 +1001,14 @@ wss.on('connection', (ws) => {
   function leaveVoice() {
     const v = voice.get(me && me.id);
     if (!v) return;
+    const roomKey = `${v.serverId}:${v.channelId}`;
     voice.delete(me.id);
     sysMsg(v.serverId, v.channelId, `**${me.username}** saiu da call.`);
     broadcastVoiceStates();
+    const remaining = [...voice.values()].filter(x => `${x.serverId}:${x.channelId}` === roomKey);
+    if (remaining.length === 0) {
+      ytRooms.delete(roomKey);
+    }
   }
 
   function bootPayload() {

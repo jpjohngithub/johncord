@@ -135,6 +135,9 @@ function connect() {
       wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + wsUrl;
     }
 
+    // No HTTPS, navegadores bloqueiam ws:// inseguro (Mixed Content)
+    if (location.protocol === 'https:' && wsUrl.startsWith('ws://')) return;
+
     try {
       const sock = new WebSocket(wsUrl);
       connectingSockets.push(sock);
@@ -389,6 +392,12 @@ function handle(d) {
       break;
     case 'voiceSpeaking':
       updateSpeakingUI(d.userId, d.speaking);
+      break;
+    case 'callReaction':
+      displayCallReaction(d.emoji, d.username);
+      break;
+    case 'ytSync':
+      handleYtSync(d);
       break;
     case 'profileUpdated':
       S.user = d.user;
@@ -3359,22 +3368,69 @@ function unlockAudioContext() {
   } catch (e) {}
 }
 
-function playNotifySound() {
+function playSfx(type) {
   try {
     unlockAudioContext();
     if (!globalAudioCtx) return;
+    const t = globalAudioCtx.currentTime;
     const osc = globalAudioCtx.createOscillator();
     const gain = globalAudioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, globalAudioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, globalAudioCtx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.08, globalAudioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, globalAudioCtx.currentTime + 0.15);
     osc.connect(gain);
     gain.connect(globalAudioCtx.destination);
-    osc.start();
-    osc.stop(globalAudioCtx.currentTime + 0.15);
+    
+    if (type === 'join') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, t);
+      osc.frequency.exponentialRampToValueAtTime(880, t + 0.14);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      osc.start(t);
+      osc.stop(t + 0.23);
+    } else if (type === 'leave') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660, t);
+      osc.frequency.exponentialRampToValueAtTime(330, t + 0.16);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+      osc.start(t);
+      osc.stop(t + 0.25);
+    } else if (type === 'mute') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(320, t);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      osc.start(t);
+      osc.stop(t + 0.09);
+    } else if (type === 'unmute') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(640, t);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      osc.start(t);
+      osc.stop(t + 0.09);
+    } else if (type === 'reaction') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(500, t);
+      osc.frequency.exponentialRampToValueAtTime(950, t + 0.12);
+      gain.gain.setValueAtTime(0.12, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.start(t);
+      osc.stop(t + 0.19);
+    } else {
+      // Default / msg
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, t);
+      osc.frequency.exponentialRampToValueAtTime(880, t + 0.08);
+      gain.gain.setValueAtTime(0.08, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      osc.start(t);
+      osc.stop(t + 0.15);
+    }
   } catch (e) {}
+}
+
+function playNotifySound() {
+  playSfx('msg');
 }
 
 function setupLocalVAD(stream) {
@@ -3512,6 +3568,7 @@ function updateVoiceTimerDisplay() {
 
 async function joinVoice(serverId, channelId) {
   unlockAudioContext();
+  playSfx('join');
   S.voice = { serverId, channelId };
   S.muted = false;
   S.deafened = false;
@@ -3584,6 +3641,8 @@ function openMicHelpModal() {
 
 function leaveVoice() {
   const prevVoice = S.voice;
+  playSfx('leave');
+  closeYtParty(false);
   cleanupLocalVAD();
   stopScreenShare(false);
   stopVoiceTimer();
@@ -3667,6 +3726,7 @@ function toggleMute() {
     return;
   }
   S.muted = !S.muted;
+  playSfx(S.muted ? 'mute' : 'unmute');
   if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !S.muted);
   if (S.muted) setLocalSpeaking(false);
   send({ t: 'voiceMute', muted: S.muted });
@@ -3677,6 +3737,7 @@ function toggleMute() {
 
 function toggleDeafen() {
   S.deafened = !S.deafened;
+  playSfx(S.deafened ? 'mute' : 'unmute');
   if (S.deafened) {
     S.muted = true;
     if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = false);
@@ -3725,17 +3786,20 @@ async function toggleScreenShare() {
     screenStream = await navigator.mediaDevices.getDisplayMedia({
       video: {
         cursor: 'always',
-        displaySurface: 'monitor'
+        displaySurface: 'monitor',
+        frameRate: { ideal: 60, max: 60 },
+        width: { ideal: 1920, max: 2560 },
+        height: { ideal: 1080, max: 1440 }
       },
       audio: true
     });
     S.screenSharing = true;
     send({ t: 'voiceScreen', screenSharing: true });
 
-    // Envia APENAS o video da tela - o audio da tela sobrescreveria a voz
-    // de quem assiste (o microfone continua sendo transmitido separadamente)
+    // Transmite video E audio da tela (Salinha style: som do jogo/janela junto!)
     for (const [pid, pc] of Object.entries(peers)) {
       screenStream.getVideoTracks().forEach(t => pc.addTrack(t, screenStream));
+      screenStream.getAudioTracks().forEach(t => pc.addTrack(t, screenStream));
       makeOffer(pc, pid);
     }
 
@@ -3884,6 +3948,156 @@ if ($('vrBtnChat')) {
   };
 }
 if ($('vrBtnLeave')) $('vrBtnLeave').onclick = leaveVoice;
+
+/* ---------- Salinha Features: Reações na Call e YouTube Watch Party ---------- */
+function displayCallReaction(emoji, username) {
+  const overlay = $('vrReactionsOverlay');
+  if (!overlay) return;
+  playSfx('reaction');
+  const el = document.createElement('div');
+  el.className = 'floating-reaction';
+  const leftPercent = 15 + Math.random() * 70;
+  el.style.left = `${leftPercent}%`;
+  el.innerHTML = `<span>${emoji}</span>${username ? `<span class="fr-sender">${esc(username)}</span>` : ''}`;
+  overlay.appendChild(el);
+  setTimeout(() => {
+    try { el.remove(); } catch (e) {}
+  }, 2800);
+}
+
+function sendCallReaction(emoji) {
+  if (!S.voice) {
+    toast('Entre em uma call para reagir!');
+    return;
+  }
+  displayCallReaction(emoji, S.user?.displayName || S.user?.username);
+  send({ t: 'callReaction', emoji });
+  const pop = $('vrReactionPopover');
+  if (pop) pop.style.display = 'none';
+}
+
+if ($('vrBtnReact')) {
+  $('vrBtnReact').onclick = e => {
+    e.stopPropagation();
+    const pop = $('vrReactionPopover');
+    if (pop) pop.style.display = pop.style.display === 'none' ? 'flex' : 'none';
+  };
+}
+document.addEventListener('click', e => {
+  const pop = $('vrReactionPopover');
+  if (pop && !e.target.closest('.vr-reaction-wrap')) {
+    pop.style.display = 'none';
+  }
+});
+document.querySelectorAll('.vr-react-chip').forEach(btn => {
+  btn.onclick = e => {
+    e.stopPropagation();
+    const em = btn.dataset.emoji;
+    if (em) sendCallReaction(em);
+  };
+});
+
+let currentYtState = null;
+function extractYtVideoId(urlOrId) {
+  if (!urlOrId) return null;
+  const str = urlOrId.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(str)) return str;
+  const m = str.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function openYtModal() {
+  if (!S.voice) {
+    toast('Entre em uma call para assistir YouTube junto com os amigos!');
+    return;
+  }
+  openModal(`
+    <h2>▶️ Assistir YouTube Junto (Watch Party)</h2>
+    <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:12px;line-height:1.5">
+      Cole o link de qualquer vídeo ou música do YouTube. Todos na call assistirão sincronizados em tempo real!
+    </p>
+    <input id="ytInputLink" class="input" placeholder="Cole o link ou ID (Ex: https://www.youtube.com/watch?v=...)" style="margin-bottom:12px" autofocus>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Sugestões rápidas:</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-small" type="button" onclick="$('ytInputLink').value='jfKfPfyJRdk'">🎵 Lofi Radio</button>
+      <button class="btn btn-ghost btn-small" type="button" onclick="$('ytInputLink').value='5qap5aO4i9A'">🎵 Synthwave</button>
+      <button class="btn btn-ghost btn-small" type="button" onclick="$('ytInputLink').value='kJQP7kiw5Fk'">🎵 Música</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="btnStartWatchParty">▶️ Iniciar Vídeo</button>
+    </div>
+  `);
+  const btn = $('btnStartWatchParty');
+  if (btn) {
+    btn.onclick = () => {
+      const val = $('ytInputLink')?.value;
+      const vid = extractYtVideoId(val);
+      if (!vid) {
+        toast('⚠️ Link inválido do YouTube.');
+        return;
+      }
+      closeModal();
+      startOrSyncYt(vid, 'play', 0);
+    };
+  }
+}
+
+function startOrSyncYt(videoId, action = 'play', time = 0) {
+  currentYtState = { videoId, action, time };
+  send({ t: 'ytSync', videoId, action, time });
+  renderYtPlayer(videoId, action, time, 'Você');
+  toast('▶️ Watch Party de YouTube iniciada!');
+}
+
+function handleYtSync(d) {
+  if (d.action === 'close') {
+    closeYtParty(false);
+    return;
+  }
+  currentYtState = { videoId: d.videoId, action: d.action, time: d.time };
+  renderYtPlayer(d.videoId, d.action, d.time, d.fromName || 'Amigo');
+}
+
+function renderYtPlayer(videoId, action, time, byUser) {
+  const area = $('vrYtArea');
+  if (!area) return;
+  area.style.display = 'flex';
+  area.innerHTML = `
+    <div class="vr-yt-header">
+      <div class="vr-yt-title">
+        <span>▶️ YouTube Junto</span>
+        <span style="font-size:12px;color:var(--text-dim);font-weight:normal">— Sincronizado por ${esc(byUser || 'Alguém')}</span>
+      </div>
+      <button class="vr-yt-close" title="Fechar Watch Party" id="vrYtCloseBtn">✕</button>
+    </div>
+    <div class="vr-yt-frame-wrap">
+      <iframe
+        id="ytActiveIframe"
+        src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowfullscreen>
+      </iframe>
+    </div>
+  `;
+  const closeBtn = $('vrYtCloseBtn');
+  if (closeBtn) {
+    closeBtn.onclick = () => closeYtParty(true);
+  }
+}
+
+function closeYtParty(notify = true) {
+  currentYtState = null;
+  const area = $('vrYtArea');
+  if (area) {
+    area.style.display = 'none';
+    area.innerHTML = '';
+  }
+  if (notify) send({ t: 'ytSync', action: 'close' });
+}
+
+if ($('vrBtnYt')) $('vrBtnYt').onclick = openYtModal;
+if ($('btnYtHeader')) $('btnYtHeader').onclick = openYtModal;
 
 function renderVoiceRoom() {
   const stage = $('voiceRoomStage');

@@ -77,6 +77,7 @@
       <span id="chanIcon" class="chan-icon">#</span>
       <span id="chanName">geral</span>
       <div class="header-actions">
+        <button id="btnYtHeader" class="btn btn-small btn-ghost" title="Assistir YouTube Junto" style="display:none">▶️ YouTube</button>
         <button id="btnInvite" class="btn btn-small btn-primary" title="Convidar pessoas">👥 Convidar</button>
         <button id="btnMembers" class="btn btn-small btn-ghost" title="Membros">Membros</button>
         <button id="btnCallDm" class="btn btn-small btn-primary" title="Ligar na chamada privada" style="display:none">📞 Ligar</button>
@@ -118,13 +119,31 @@
             <button class="vr-top-btn" id="btnVrFullscreen" title="Tela Cheia do Palco">⛶ Palco Cheio</button>
           </div>
         </div>
-        <div class="voice-room-stage" id="voiceRoomStage"></div>
+        <div class="voice-room-stage" id="voiceRoomStage">
+          <div id="vrYtArea" class="vr-yt-area" style="display:none"></div>
+          <div id="vrGridArea" class="vr-grid-area"></div>
+          <div id="vrReactionsOverlay" class="vr-reactions-overlay"></div>
+        </div>
         <div class="voice-room-controls" id="voiceRoomControls">
           <button class="vr-btn" id="vrBtnMute" title="Silenciar Microfone">🎤 Microfone</button>
           <button class="vr-btn" id="vrBtnDeafen" title="Ensurdecer">🎧 Áudio</button>
-          <button class="vr-btn primary" id="vrBtnScreen" title="Compartilhar Tela">🖥️ Compartilhar Tela</button>
-          <button class="vr-btn" id="vrBtnChat" title="Alternar para Chat de Texto">💬 Chat de Texto</button>
-          <button class="vr-btn danger" id="vrBtnLeave" title="Desconectar da Call">📞 Desconectar</button>
+          <button class="vr-btn primary" id="vrBtnScreen" title="Compartilhar Tela com Áudio">🖥️ Transmitir Tela</button>
+          <button class="vr-btn" id="vrBtnYt" title="Assistir YouTube Junto">▶️ YouTube Junto</button>
+          <div class="vr-reaction-wrap" style="position:relative;display:inline-block">
+            <button class="vr-btn" id="vrBtnReact" title="Reagir na Call">✨ Reações</button>
+            <div class="vr-reaction-popover" id="vrReactionPopover" style="display:none">
+              <button class="vr-react-chip" data-emoji="❤️" type="button">❤️</button>
+              <button class="vr-react-chip" data-emoji="😂" type="button">😂</button>
+              <button class="vr-react-chip" data-emoji="🔥" type="button">🔥</button>
+              <button class="vr-react-chip" data-emoji="👏" type="button">👏</button>
+              <button class="vr-react-chip" data-emoji="🎉" type="button">🎉</button>
+              <button class="vr-react-chip" data-emoji="🚀" type="button">🚀</button>
+              <button class="vr-react-chip" data-emoji="💩" type="button">💩</button>
+              <button class="vr-react-chip" data-emoji="💯" type="button">💯</button>
+            </div>
+          </div>
+          <button class="vr-btn" id="vrBtnChat" title="Alternar para Chat de Texto">💬 Chat</button>
+          <button class="vr-btn danger" id="vrBtnLeave" title="Desconectar da Call">📞 Sair</button>
         </div>
       </div>
 
